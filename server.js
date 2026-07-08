@@ -760,8 +760,17 @@ Per qualifying asset, save: name, modality (English term), target(s), indication
 
 OUTCOMES from Steps 1+2:
   (A) drugBaseCN returns zero results for this company →
-      STOP. Return: status="inconclusive", inconclusiveReason="Company not found in Pharmcube — route to secondary track"
-      Do NOT try web searches or alternate name variants.
+      Before concluding "not found", make exactly ONE fallback call with common corporate suffixes
+      stripped from the name. Strip any trailing: Bio, Biotech, Biosciences, Biotherapeutics,
+      Therapeutics, Pharma, Pharmaceuticals, Sciences, Medicine, Medicines, Inc, Ltd, Corp, Co,
+      Group, Holdings, Oncology, Immunology, Genomics. Strip only one suffix per retry
+      (e.g. "Hanchor Bio" → "Hanchor"). Then re-call drugBaseCN with the stripped name.
+      Sanity check: if results come back, confirm that company_names_revised or company_names
+      in at least one result plausibly matches the original query (shared word root, Chinese name
+      phonetically similar, or English alias). If no plausible match, treat as not found.
+      If still zero results after the one retry → return: status="inconclusive",
+      inconclusiveReason="Company not found in Pharmcube — route to secondary track".
+      Total cap: 2 drugBaseCN calls. Do NOT try web searches.
   (B) Results found, ≥1 qualifying oncology biologic asset → proceed to Step 3
   (C) Results found, zero qualifying assets (all non-oncology, all small-molecule, all excluded modalities) →
       Return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube"
@@ -874,7 +883,8 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
 ═══ RULES ═══
 
   — Always call drugBaseCN BEFORE any web tool
-  — If not found in Pharmcube: return inconclusive immediately, no web search
+  — drugBaseCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
+  — If still not found after retry: return inconclusive immediately, no web search
   — Run Step 3 (competitive overlap) BEFORE calling drugDeal — it's free and eliminates assets
   — Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
   — Use NCI-standard target names: PD-1 (not PD1), HER2 (not ERBB2), EGFR, CD3, CD19, etc.
