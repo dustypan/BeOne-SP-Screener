@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeOne Superhighway Manufacturing Partnership Screener – Hopewell, NJ</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-logo"><img src="/images/beone-logo-nobg.png" alt="BeOne"></div>
+  <div class="header-text">
+    <h1>BeOne Superhighway Manufacturing Partnership Screener – Hopewell, NJ</h1>
+  </div>
+  <button id="logout-btn" class="header-logout" hidden>Sign out</button>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Upload                                           -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-upload" class="section active">
+  <div class="page-content">
+    <div class="upload-intro">
+      <h2>Upload Company List</h2>
+      <p>Upload an Excel or CSV file containing the companies to screen.</p>
+      <button id="view-history-btn" class="btn-history-link">📋 View run history</button>
+      <button id="view-repo-btn" class="btn-history-link">🏢 Company repository</button>
+    </div>
+
+    <div class="criteria-card">
+      <div class="criteria-col">
+        <div class="criteria-heading">Screening Criteria</div>
+        <ul class="criteria-list">
+          <li><span class="ci-pass">✓</span> Oncology biologics — mAb, bsAb, ADC, TCE, Fc-fusion and related CHO-expressed modalities</li>
+          <li><span class="ci-pass">✓</span> Preclinical stage and above (Discovery and Lead Opt included)</li>
+          <li><span class="ci-pass">✓</span> Global or US rights retained by the company</li>
+          <li><span class="ci-pass">✓</span> No existing US CDMO or manufacturing partner for the asset</li>
+        </ul>
+        <div class="criteria-heading" style="margin-top:14px;">Not Screened For</div>
+        <ul class="criteria-list">
+          <li><span class="ci-neutral">–</span> Asset quality or clinical competitiveness</li>
+          <li><span class="ci-neutral">–</span> Financial viability or partnership readiness</li>
+        </ul>
+      </div>
+      <div class="criteria-divider"></div>
+      <div class="criteria-col">
+        <div class="criteria-heading">How to Use</div>
+        <ul class="criteria-list">
+          <li><span class="ci-info">→</span> Use the <strong>MoA / Target filter</strong> (Ask 3) to narrow by mechanism of action</li>
+          <li><span class="ci-info">→</span> Use the <strong>🚩 Flag High Priority Assets</strong> button to surface synergy signals across strategic, indication, and phase dimensions</li>
+          <li><span class="ci-info">→</span> Click <strong>🔗 Sources</strong> on any company row to see every source consulted during screening and which criteria each informed</li>
+          <li><span class="ci-info">→</span> Click <strong>Console</strong> on any inconclusive entry to see the full step-by-step screening rationale</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card upload-card">
+      <div class="card-body api-key-section">
+        <label for="api-key-input" class="api-key-label">Anthropic API Key</label>
+        <div class="api-key-row">
+          <input type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
+          <button id="api-key-save-btn" class="btn-secondary">Save</button>
+        </div>
+        <span id="api-key-status" class="api-key-status missing">No key saved — paste your Anthropic API key above</span>
+      </div>
+    </div>
+
+    <div class="card upload-card">
+      <div class="card-body">
+
+        <div id="dropzone">
+          <span class="dropzone-icon">📂</span>
+          <div class="dropzone-main">Click to browse or drag and drop</div>
+          <div class="dropzone-sub">Excel or CSV file with a list of company names</div>
+          <div class="dropzone-formats">.xlsx · .xls · .csv</div>
+        </div>
+        <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none">
+
+        <div class="upload-divider"><span>or</span></div>
+
+        <div class="field-group">
+          <label for="company-textbox">Paste company names (one per line)</label>
+          <textarea id="company-textbox" rows="8" placeholder="Duality Biologics&#10;Insilico Medicine&#10;Hanchor Bio&#10;..."></textarea>
+          <div class="picker-actions">
+            <button id="run-textbox-btn" class="btn-primary">Run Screener →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Column Picker                                    -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-column-pick" class="section">
+  <div class="page-content">
+    <div class="card">
+      <div class="card-header">
+        <h2>Select Company Name Column</h2>
+      </div>
+      <div class="card-body">
+        <div id="file-name-display" class="file-name-chip">📄 file.xlsx</div>
+
+        <div class="field-group">
+          <label for="column-select">Which column contains company names?</label>
+          <select id="column-select"></select>
+          <div id="column-preview"></div>
+        </div>
+
+        <div class="picker-actions">
+          <button id="back-to-upload" class="btn-secondary">← Back</button>
+          <button id="run-screener-btn" class="btn-primary">Run Screener →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Loading                                          -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-loading" class="section">
+  <div class="page-content">
+    <div class="loading-title">Running screener…</div>
+    <div class="progress-wrap">
+      <div id="progress-bar-fill"></div>
+    </div>
+    <div id="progress-label">Starting…</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Re-screening inconclusives with provided URLs    -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-rescreening" class="section">
+  <div class="page-content">
+    <div class="loading-title">Screening inconclusives…</div>
+    <p class="ask-sub">Re-running all inconclusive companies from Ask 1 — using the URL you provided where given — before loading the final results.</p>
+    <div class="progress-wrap">
+      <div id="rescreen-progress-bar-fill"></div>
+    </div>
+    <div id="rescreen-progress-label">Starting…</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Summary                                          -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-summary" class="section">
+  <div class="page-content">
+
+    <div class="summary-buckets">
+
+      <!-- Qualifying -->
+      <div class="bucket-card qualifying">
+        <div class="bucket-head">
+          <div class="bucket-icon">✓</div>
+          <div class="bucket-label">
+            <div class="bucket-label-title">✓ Qualifying</div>
+            <div class="bucket-count" id="count-qualifying">0</div>
+          </div>
+          <button class="bucket-toggle" title="Expand/collapse">▼</button>
+        </div>
+        <div class="bucket-body" id="list-qualifying"></div>
+      </div>
+
+      <!-- Excluded -->
+      <div class="bucket-card excluded">
+        <div class="bucket-head">
+          <div class="bucket-icon">✗</div>
+          <div class="bucket-label">
+            <div class="bucket-label-title">✗ Excluded</div>
+            <div class="bucket-count" id="count-excluded">0</div>
+          </div>
+          <button class="bucket-toggle" title="Expand/collapse">▼</button>
+        </div>
+        <div class="bucket-body" id="list-excluded"></div>
+      </div>
+
+      <!-- Inconclusive -->
+      <div class="bucket-card inconclusive">
+        <div class="bucket-head">
+          <div class="bucket-icon">?</div>
+          <div class="bucket-label">
+            <div class="bucket-label-title">Inconclusive</div>
+            <div class="bucket-count" id="count-inconclusive">0</div>
+          </div>
+          <button class="bucket-toggle" title="Expand/collapse">▼</button>
+        </div>
+        <div class="bucket-body" id="list-inconclusive"></div>
+      </div>
+
+    </div>
+
+    <div class="summary-footer">
+      <button id="continue-wizard-btn" class="btn-primary">Continue to Filter →</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Wizard                                           -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-wizard" class="section">
+  <div class="page-content">
+
+    <div class="wizard-header">
+      <!-- Step dots -->
+      <div class="step-indicator">
+        <div class="step-dot" title="Ask 1: Website Input">1</div>
+        <div class="step-line"></div>
+        <div class="step-dot" title="Ask 2: Met With">2</div>
+        <div class="step-line"></div>
+        <div class="step-dot" title="Ask 3: Target / Pathway">3</div>
+      </div>
+
+      <div id="remaining-count">— companies remaining</div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+
+        <!-- Ask 1: Website Input -->
+        <div class="ask-panel" id="ask-1">
+          <div class="ask-title">Ask 1 — Rerun Inconclusives</div>
+          <div class="ask-sub">The following companies came back inconclusive during screening (no website found, or hit the research budget before finishing). Provide a URL if you have one to speed up the rerun — leave blank if no website exists or none is needed. All of these will be re-screened before the final results load.</div>
+          <p id="ask1-none-msg" class="empty-msg hidden">No inconclusive companies to rerun.</p>
+          <div id="ask1-companies"></div>
+        </div>
+
+        <!-- Ask 2: Met With -->
+        <div class="ask-panel" id="ask-2">
+          <div class="ask-title">Ask 2 — Met With This Company?</div>
+          <div class="ask-sub">Select any companies BeOne has previously reviewed and record the outcome. Negative filters the company out. Revisit means the company has been reviewed but either no conclusion was reached, or sufficient time has passed from the last decline to warrant a fresh look — it stays screened in.</div>
+          <div id="ask2-companies"></div>
+        </div>
+
+        <!-- Ask 3: Target / Pathway -->
+        <div class="ask-panel" id="ask-3">
+          <div class="ask-title">Ask 3 — Target / Pathway</div>
+          <div class="ask-sub">Filter by target combination (MoA) — targets are shown as the full combination per asset (e.g. PD-1×IL-2). Toggle "Any target" to skip, or use Select all then deselect the few you want to exclude.</div>
+          <div class="any-target-wrap">
+            <input type="checkbox" id="any-target-toggle" checked>
+            <label for="any-target-toggle">Any target — show all remaining companies</label>
+          </div>
+          <div class="ask3-bulk-actions">
+            <button type="button" id="ask3-select-all-btn" class="btn-text">Select all</button>
+            <span class="ask3-bulk-sep">·</span>
+            <button type="button" id="ask3-deselect-all-btn" class="btn-text">Deselect all</button>
+          </div>
+          <div class="cb-grid" id="ask3-targets"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="wizard-nav">
+      <button id="wizard-back-btn" class="btn-secondary">← Summary</button>
+      <button id="wizard-next-btn" class="btn-primary">Next →</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Results                                          -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-results" class="section">
+  <div class="page-content wide">
+
+    <div class="results-toolbar">
+      <button id="back-to-wizard-btn" class="btn-secondary">← Filters</button>
+      <input type="search" id="results-search" placeholder="Search company or asset…">
+      <label class="toggle-wrap">
+        <input type="checkbox" id="hide-competitors-toggle" checked>
+        Hide direct competitors
+      </label>
+      <span id="results-asset-count"></span>
+      <button id="autoflag-btn" class="btn-outline">🚩 Flag High Priority Assets</button>
+      <button id="export-csv-btn" class="btn-outline">⬇ Export CSV</button>
+    </div>
+    <div id="autoflag-status" class="autoflag-status hidden"></div>
+
+    <div class="results-table-wrap">
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Asset</th>
+            <th>Modality</th>
+            <th>Target(s)</th>
+            <th>Flags</th>
+          </tr>
+        </thead>
+        <tbody id="results-tbody">
+          <tr><td colspan="5" class="empty-cell">Loading results…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Excluded footer -->
+    <div id="excluded-footer" class="hidden">
+      <h3>✗ Excluded</h3>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Excluded At</th>
+              <th>Reason</th>
+              <th>Source</th>
+              <th>Console</th>
+              <th>Sources</th>
+            </tr>
+          </thead>
+          <tbody id="excluded-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Inconclusives footer -->
+    <div id="inconclusives-footer" class="hidden">
+      <h3>⚠ Unresolved Inconclusives</h3>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Reason</th>
+              <th>Source</th>
+              <th>Console</th>
+              <th>Sources</th>
+            </tr>
+          </thead>
+          <tbody id="inconclusives-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- MODAL: Flag Editor                                        -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="flag-modal" class="modal-wrap hidden">
+  <div id="modal-overlay"></div>
+  <div class="modal-box">
+    <h3 id="flag-modal-title">Edit Flags</h3>
+    <div id="flag-modal-options"></div>
+    <div class="modal-actions">
+      <button id="cancel-flags-btn" class="btn-secondary">Cancel</button>
+      <button id="save-flags-btn" class="btn-primary">Save Flags</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- MODAL: External Sources                                   -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="sources-modal" class="modal-wrap hidden">
+  <div id="sources-modal-overlay"></div>
+  <div class="modal-box modal-box-wide">
+    <h3 id="sources-modal-title">Sources</h3>
+    <div id="sources-modal-list"></div>
+    <div class="modal-actions">
+      <button id="close-sources-btn" class="btn-secondary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: Repository                                       -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-repo" class="section">
+  <div class="page-content">
+    <div class="history-header">
+      <h2>Company Repository</h2>
+      <div class="history-header-actions">
+        <button id="clear-all-data-btn" class="btn-danger-sm">🗑 Clear All Data</button>
+        <button id="back-from-repo-btn" class="btn-secondary">← Back</button>
+      </div>
+    </div>
+    <p class="repo-subtitle">Most recent screening result per company, across all runs.</p>
+    <div class="repo-search-row">
+      <input id="repo-search" type="search" class="repo-search-input" placeholder="Search companies…" />
+      <div class="repo-filters">
+        <button class="repo-filter-btn active" data-filter="all">All</button>
+        <button class="repo-filter-btn" data-filter="qualifying">Qualifying</button>
+        <button class="repo-filter-btn" data-filter="inconclusive">Inconclusive</button>
+        <button class="repo-filter-btn" data-filter="excluded">Excluded</button>
+      </div>
+      <span id="repo-count" class="repo-count"></span>
+    </div>
+    <div id="repo-list" class="repo-list">
+      <p class="empty-msg">Loading…</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SECTION: History                                          -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<section id="section-history" class="section">
+  <div class="page-content">
+    <div class="history-header">
+      <h2>Run History</h2>
+      <div class="history-header-actions">
+        <button id="clear-history-btn" class="btn-danger-sm">🗑 Clear All Data</button>
+        <button id="back-from-history-btn" class="btn-secondary">← Back</button>
+      </div>
+    </div>
+    <div id="history-list" class="history-list">
+      <p class="empty-msg">Loading…</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- MODAL: Console Log (inconclusives)                        -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="console-modal" class="modal-wrap hidden">
+  <div id="console-modal-overlay"></div>
+  <div class="modal-box console-modal-box">
+    <h3 id="console-modal-title">Screening Console</h3>
+    <pre id="console-modal-log" class="console-log-box"></pre>
+    <div class="modal-actions">
+      <button id="close-console-btn" class="btn-secondary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- SheetJS — Excel parsing -->
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
+<!-- App scripts (order matters) -->
+<script src="js/enums.js"></script>
+<script src="js/data.js"></script>
+<script src="js/screener.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
