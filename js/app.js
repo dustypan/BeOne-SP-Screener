@@ -1120,6 +1120,53 @@ function renderExcludedFooter() {
   tbody.querySelectorAll('.btn-sources-view').forEach(btn => {
     btn.addEventListener('click', () => openSourcesModal(btn.dataset.coId));
   });
+
+  // Manufacturing-excluded assets sub-section (step5 / layer4 failures across all companies)
+  const mfgExcluded = [];
+  for (const co of (state.companies || [])) {
+    for (const a of (co.assets || [])) {
+      if (a.layer4 && a.layer4.status === 'fail') {
+        mfgExcluded.push({ co, a });
+      }
+    }
+  }
+
+  let mfgSection = document.getElementById('mfg-excluded-section');
+  if (!mfgSection) {
+    mfgSection = document.createElement('div');
+    mfgSection.id = 'mfg-excluded-section';
+    section.appendChild(mfgSection);
+  }
+
+  if (mfgExcluded.length === 0) {
+    mfgSection.innerHTML = '';
+  } else {
+    const mfgRows = mfgExcluded.map(({ co, a }) => {
+      const src = a.layer4.source
+        ? `<a href="${escHtml(a.layer4.source)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`
+        : '—';
+      return `<tr>
+        <td>${escHtml(co.name)}</td>
+        <td>${escHtml(a.name || '—')}</td>
+        <td>${escHtml(a.modality || '—')}</td>
+        <td>${escHtml((a.targets || []).join(', ') || '—')}</td>
+        <td>${escHtml(a.layer4.reason || 'US manufacturing confirmed')}</td>
+        <td>${src}</td>
+      </tr>`;
+    }).join('');
+
+    mfgSection.innerHTML = `
+      <h4 class="mfg-excluded-heading">Assets excluded at manufacturing (Step 5)</h4>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead><tr>
+            <th>Company</th><th>Asset</th><th>Modality</th>
+            <th>Target(s)</th><th>Reason</th><th>Source</th>
+          </tr></thead>
+          <tbody>${mfgRows}</tbody>
+        </table>
+      </div>`;
+  }
 }
 
 function openConsoleModal(name, log) {

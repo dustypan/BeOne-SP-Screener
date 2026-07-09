@@ -1232,6 +1232,15 @@ details[open] > .evidence-snapshots-header::before { content: '▼ '; }
 
 .user-excluded-row td { color: var(--text-muted); font-style: italic; }
 
+.mfg-excluded-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 20px 0 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--gray-200);
+}
+
 /* Inconclusives footer */
 #inconclusives-footer {
   margin-top: 24px;
