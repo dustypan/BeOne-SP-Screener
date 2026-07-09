@@ -256,17 +256,18 @@ const DELTA_TOOLS = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-// Pharmcube primary track tools — drugBaseCN + drugDeal + web tools for Step 4
+// Pharmcube primary track tools — drugBaseLiteCN + drugDeal + web tools for Step 4
 // ─────────────────────────────────────────────────────────────
 
 const PHARMCUBE_TOOLS = [
   { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
   TOOLS.find(t => t.name === 'fetch_webpage'),
   {
-    name: 'drugBaseCN',
+    name: 'drugBaseLiteCN',
     description: [
-      'Search Pharmcube pharmaceutical database for a company\'s pipeline assets.',
-      'Returns biologic and small-molecule assets with fields:',
+      'Search Pharmcube pharmaceutical database for a company\'s pipeline assets (lite/low-cost version — 15 pts per record vs 90 pts).',
+      'IMPORTANT: Pharmcube charges per record returned. Always pass drugType2=["生物"], diseaseArea="肿瘤领域", status=["Active","Unknown"] to pre-filter and avoid paying for irrelevant records.',
+      'Returns all core fields needed for Steps 1+2 screening:',
       '  drug_type_2: "生物" = Biologic, "化药" = Small molecule',
       '  drug_type_3 / modality: "抗体" = mAb, "双特异性抗体" = bsAb, "抗体偶联药物" = ADC,',
       '    "单域抗体" = VHH/nanobody (EXCLUDED), "mRNA疗法" = mRNA/LNP (EXCLUDED),',
@@ -274,17 +275,20 @@ const PHARMCUBE_TOOLS = [
       '  disease_area: "肿瘤领域" = oncology/tumor',
       '  latest_phase: development phase',
       '  status: Active (progress within 3yr), Unknown (3-6yr), Inactive (>6yr/abandoned)',
-      '  deal_num: number of licensing deals (0 = skip drugDeal call)',
       'Use companyName to look up by company. Returns all assets across all phases.',
+      'Always pass pageNo (0-indexed) and pageSize (use 20).',
     ].join('\n'),
     input_schema: {
       type: 'object',
       properties: {
         companyName: { type: 'string', description: 'Company name to search (English or Chinese accepted)' },
-        page: { type: 'number', description: 'Page number (default 1)' },
-        pageSize: { type: 'number', description: 'Results per page (default 20, max 50)' },
+        pageNo: { type: 'number', description: 'Page number, 0-indexed (use 0 for first page)' },
+        pageSize: { type: 'number', description: 'Results per page (use 20)', enum: [1, 5, 10, 20, 50] },
+        drugType2: { type: 'array', items: { type: 'string' }, description: 'Filter by drug category. ALWAYS pass ["生物"] to return only biologics and avoid charges for small molecules.' },
+        diseaseArea: { type: 'string', description: 'Filter by disease area. ALWAYS pass "肿瘤领域" to return only oncology assets and avoid charges for non-oncology.' },
+        status: { type: 'array', items: { type: 'string' }, description: 'Filter by development status. ALWAYS pass ["Active","Unknown"] to exclude Inactive (abandoned) assets.' },
       },
-      required: ['companyName'],
+      required: ['companyName', 'pageNo', 'pageSize'],
     },
   },
   {
@@ -620,7 +624,7 @@ Thermo Fisher Biologics, Fujifilm Diosynth US, Catalent Biologics, Rentschler US
 Patheon (drug substance operations only — Patheon fill & finish does not count).
 Own US biologics facility (drug substance scale): excluded only if ≥200L bioreactor capacity
 confirmed. If capacity unstated → PASS, note in researchNotes.
-Default if ambiguous or budget exhausted: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Only exclude if clearly disclosed.
+Default if ambiguous, budget exhausted, or time runs out: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Never return inconclusive on manufacturing alone — the company still qualifies. Only exclude if clearly disclosed.
 
 RULES:
 - Return ONLY valid JSON at the end — no text before or after it
@@ -724,19 +728,25 @@ in the UI, not by Claude.
 const PHARMCUBE_PRIMARY_PROMPT = `
 You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
-CONTEXT: PRIMARY TRACK — Pharmcube MCP. The company has already passed the Big Pharma pre-filter. You have access to Pharmcube (drugBaseCN, drugDeal) plus web tools (web_search, fetch_webpage) for Step 5.
+CONTEXT: PRIMARY TRACK — Pharmcube MCP. The company has already passed the Big Pharma pre-filter. You have access to Pharmcube (drugBaseLiteCN, drugDeal) plus web tools (web_search, fetch_webpage) for Step 5.
 
 OBJECTIVE: Screen through Steps 1+2 → 3 → 4 → 5 in order. If the company is NOT FOUND in Pharmcube, return inconclusive immediately — do NOT search the web. The secondary research track will handle it.
 
-═══ STEPS 1 + 2 — Oncology Biologic Identification (call drugBaseCN FIRST) ═══
+═══ STEPS 1 + 2 — Oncology Biologic Identification (call drugBaseLiteCN FIRST) ═══
 
-Call drugBaseCN with companyName = the given company name.
+Call drugBaseLiteCN with:
+  companyName = the given company name
+  pageNo = 0, pageSize = 20
+  drugType2 = ["生物"]        ← biologics only (avoids charges for small molecules)
+  diseaseArea = "肿瘤领域"    ← oncology only (avoids charges for non-oncology assets)
+  status = ["Active","Unknown"] ← exclude Inactive (abandoned) assets upfront
 
 Filter results to qualifying assets where ALL of:
   (a) disease_area contains oncology/tumor indication
       — 肿瘤领域, 肿瘤, tumor, cancer, leukemia, lymphoma, carcinoma, sarcoma, etc.
   (b) drug_type_2 = "生物" (Biologic)
   (c) drug_type_3 / modality is a qualifying CHO-expressed format:
+  (d) status ≠ "Inactive" — silently drop Inactive assets (officially abandoned or >6yr no progress); keep Active and Unknown
 
 QUALIFYING (CHO — these count):
   抗体 / Monoclonal antibody      → mAb
@@ -759,21 +769,22 @@ EXCLUDED (NOT CHO — do not qualify):
 Per qualifying asset, save: name, modality (English term), target(s), indication (English), latest_phase, status (Active/Unknown/Inactive).
 
 OUTCOMES from Steps 1+2:
-  (A) drugBaseCN returns zero results for this company →
+  (A) drugBaseLiteCN returns zero results for this company →
       Before concluding "not found", make exactly ONE fallback call with common corporate suffixes
       stripped from the name. Strip any trailing: Bio, Biotech, Biosciences, Biotherapeutics,
       Therapeutics, Pharma, Pharmaceuticals, Sciences, Medicine, Medicines, Inc, Ltd, Corp, Co,
       Group, Holdings, Oncology, Immunology, Genomics. Strip only one suffix per retry
-      (e.g. "Hanchor Bio" → "Hanchor"). Then re-call drugBaseCN with the stripped name.
-      Sanity check: if results come back, confirm that company_names_revised or company_names
-      in at least one result plausibly matches the original query (shared word root, Chinese name
-      phonetically similar, or English alias). If no plausible match, treat as not found.
+      (e.g. "Hanchor Bio" → "Hanchor"). Then re-call drugBaseLiteCN with the stripped name and the same filters (drugType2, diseaseArea, status).
+      Sanity check: if results come back, confirm that the company name field in at least one
+      result plausibly matches the original query (shared word root, Chinese name phonetically
+      similar, or English alias). If no plausible match, treat as not found.
       If still zero results after the one retry → return: status="inconclusive",
       inconclusiveReason="Company not found in Pharmcube — route to secondary track".
-      Total cap: 2 drugBaseCN calls. Do NOT try web searches.
+      Total cap: 2 drugBaseLiteCN calls. Do NOT try web searches.
   (B) Results found, ≥1 qualifying oncology biologic asset → proceed to Step 3
-  (C) Results found, zero qualifying assets (all non-oncology, all small-molecule, all excluded modalities) →
+  (C) Results found, zero qualifying assets (all non-oncology, all small-molecule, all excluded modalities, or all Inactive) →
       Return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube"
+      If all assets were Inactive, set excludedReason="All oncology biologic assets are Inactive (abandoned or >6yr no progress)"
 
 ═══ STEP 3 — COMPETITIVE OVERLAP (no API call — pure data check, run immediately after Steps 1+2) ═══
 
@@ -835,25 +846,20 @@ If ≥1 passes → proceed to Step 5
 ═══ STEP 5 — US Manufacturing Screen ═══
 
 Applies to all companies (public and private) — use the same escalation regardless of listing status.
-Target: complete Step 5 in ≤25 seconds. Stop immediately once you have a conclusive answer.
+Target: complete Step 5 in ≤90 seconds. Stop immediately once you have a conclusive answer.
 Budget: max 5 tool calls for this step.
 
 Escalation order (stop as soon as a clear answer is found):
 
-  5a — IR / investor relations page + corporate presentation (up to 2 fetches):
-       Fetch the company's IR page (/investors, /ir, /investor-relations). From it, find and fetch
-       the most recent corporate overview or investor presentation slide deck. Scan for any
-       manufacturing or CDMO partnership slide.
-
-  5b — Company newsroom / press releases page (1 fetch):
+  5a — Company newsroom / press releases page (1 fetch):
        Fetch /news, /press, /media, or /newsroom. Scan headlines for manufacturing deal announcements.
 
-  5c — Targeted CDMO search + fetch (1 search + 1 fetch):
+  5b — Targeted CDMO search + fetch (1 search + 1 fetch):
        web_search: "[company name]" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
        "Thermo Fisher" OR "Catalent" OR "Fujifilm Diosynth" OR "AGC Biologics" OR Rentschler) manufacturing
        Fetch the top result if it looks relevant.
 
-  5d — General US manufacturing search + fetch (1 search + 1 fetch):
+  5c — General US manufacturing search + fetch (1 search + 1 fetch):
        web_search: "[company name]" biologics manufacturing CDMO "United States" OR "US facility" OR "US plant"
        Fetch the top result if it looks relevant.
 
@@ -875,15 +881,15 @@ OUTCOMES per asset:
   — Fill & finish / drug product only → layer4: pass
   — Ex-US manufacturing only → layer4: pass
   — No manufacturing disclosure found → layer4: pass (manufacturing gap confirmed)
-  — Ambiguous / Step 5 budget exhausted without clear answer → layer4: pass, add "check-mfg-partner"
-    to the company-level flags[] array
+  — Ambiguous / Step 5 budget or time exhausted without clear answer → layer4: pass, add "check-mfg-partner"
+    to the company-level flags[] array. Never return inconclusive due to Step 5 alone — the company still qualifies.
 
 SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with usedFor: "Step 5 manufacturing".
 
 ═══ RULES ═══
 
-  — Always call drugBaseCN BEFORE any web tool
-  — drugBaseCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
+  — Always call drugBaseLiteCN BEFORE any web tool
+  — drugBaseLiteCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
   — If still not found after retry: return inconclusive immediately, no web search
   — Run Step 3 (competitive overlap) BEFORE calling drugDeal — it's free and eliminates assets
   — Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
@@ -930,8 +936,8 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
   "researchNotes": "",
   "sources": [
     {
-      "url": "pharmcube:drugBaseCN",
-      "label": "Pharmcube drugBaseCN",
+      "url": "pharmcube:drugBaseLiteCN",
+      "label": "Pharmcube drugBaseLiteCN",
       "usedFor": "Steps 1+2 — oncology biologic identification",
       "type": "pharmcube"
     }
@@ -942,7 +948,7 @@ Notes on the asset schema:
   layer5 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer5.status = "inconclusive", reason = "No target — not applicable".
   layer3 = Step 4 rights check. Only fill for assets that passed Step 3 (not competed out). For assets eliminated at Step 3, leave layer3/layer4 as null or omit.
   layer4 = Step 5 manufacturing check. Only fill for assets that passed Steps 3+4.
-  For Pharmcube tool calls in sources[], use "pharmcube:drugBaseCN" and "pharmcube:drugDeal" as url placeholders.
+  For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" and "pharmcube:drugDeal" as url placeholders.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -1028,7 +1034,7 @@ function makeEvidenceSnapshot(url, content, type = 'fetch') {
 
 // ─────────────────────────────────────────────────────────────
 // Pharmcube MCP — direct JSON-RPC call to the Streamable HTTP endpoint
-// Called when Claude (in the primary track loop) invokes drugBaseCN or drugDeal
+// Called when Claude (in the primary track loop) invokes drugBaseLiteCN or drugDeal
 // ─────────────────────────────────────────────────────────────
 
 async function callPharmcubeTool(toolName, toolArgs) {
@@ -1320,7 +1326,7 @@ Return ONLY this JSON, nothing else:
 }
 
 // ─────────────────────────────────────────────────────────────
-// Pharmcube primary track — Claude loop using drugBaseCN + drugDeal + web tools
+// Pharmcube primary track — Claude loop using drugBaseLiteCN + drugDeal + web tools
 // Returns a full result object. If status=inconclusive and inconclusiveReason
 // contains "not found in Pharmcube", the caller should run the secondary track.
 // ─────────────────────────────────────────────────────────────
@@ -1328,7 +1334,7 @@ Return ONLY this JSON, nothing else:
 async function screenWithPharmcubePrimary(companyName, client) {
   const messages = [{
     role: 'user',
-    content: `Screen this company through the Pharmcube primary track: "${companyName}"\n\nStart immediately by calling drugBaseCN. Do not run web_search first.`,
+    content: `Screen this company through the Pharmcube primary track: "${companyName}"\n\nStart immediately by calling drugBaseLiteCN. Do not run web_search first.`,
   }];
 
   const MAX_ITERATIONS = 14;
@@ -1417,7 +1423,7 @@ async function screenWithPharmcubePrimary(companyName, client) {
         console.log(`    [${companyName}] [pharmcube] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 100)}`);
         let output;
         try {
-          if (toolUse.name === 'drugBaseCN' || toolUse.name === 'drugDeal') {
+          if (toolUse.name === 'drugBaseLiteCN' || toolUse.name === 'drugDeal') {
             output = await callPharmcubeTool(toolUse.name, toolUse.input);
           } else if (toolUse.name === 'fetch_webpage') {
             fetchedUrls.push(toolUse.input.url);
@@ -1606,17 +1612,14 @@ STEP 2 — MANDATORY PRIMARY-SOURCE READ (do this regardless of how confident yo
 
 Unified Layer 4 manufacturing escalation (used by ALL tracks when Layer 4 is ambiguous after
 the primary-source read — stop as soon as you have a clear answer):
-  L4-a: Fetch the company's IR page (/investors, /ir, /investor-relations) → from it, find and
-         fetch the most recent corporate overview or investor presentation slide deck. Scan for
-         any manufacturing / CDMO slide. (2 fetches max; skip to L4-b if no IR page exists.)
-  L4-b: Fetch company newsroom / press releases page (/news, /press, /media) — 0 extra calls
+  L4-a: Fetch company newsroom / press releases page (/news, /press, /media) — 0 extra calls
          if already fetched for Layer 3, otherwise 1 fetch.
-  L4-c: web_search: "${companyName}" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
+  L4-b: web_search: "${companyName}" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
          "Thermo Fisher" OR "Catalent" OR "Fujifilm Diosynth" OR "AGC Biologics") manufacturing
          + fetch top result if relevant.
-  L4-d: web_search: "${companyName}" biologics manufacturing CDMO "United States" OR "US facility"
+  L4-c: web_search: "${companyName}" biologics manufacturing CDMO "United States" OR "US facility"
          + fetch top result if relevant.
-  Default: PASS + add "check-mfg-partner" to flags[] if still unresolved after L4-d.
+  Default: PASS + add "check-mfg-partner" to flags[] if still unresolved after L4-c.
   Tag all Layer 4 escalation sources with usedFor: "Layer 4 manufacturing" in sources[].
 
 - SEC-FILING track: call lookup_sec_filing(ticker) once, then fetch_webpage the result once
@@ -1674,10 +1677,8 @@ Layer 3 (rights): fetch_webpage their news/press page once and scan for rights-t
   If Layer 3 still ambiguous: ONE web_search("${companyName} out-license OR partnership OR option
   rights terminated") — snippets only.
 
-Layer 4 (manufacturing): run the unified Layer 4 escalation from Step 2 (L4-a through L4-d).
-  L4-a (IR presentation) applies to all companies regardless of public/private status — try the
-  IR page even for private companies; if it doesn't exist, skip to L4-b.
-  L4-b (newsroom) may already be fetched from the Layer 3 scan above — 0 extra calls if so.
+Layer 4 (manufacturing): run the unified Layer 4 escalation from Step 2 (L4-a through L4-c).
+  L4-a (newsroom) may already be fetched from the Layer 3 scan above — 0 extra calls if so.
 
 ONLY NOW does "stop once confident" apply: once steps 0-3 above are complete for your track,
 the budget is a ceiling, not a target — the moment you have enough to answer confidently, stop
