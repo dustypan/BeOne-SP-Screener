@@ -888,6 +888,11 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
 
 ═══ RULES ═══
 
+  ★ GOLDEN RULE — ASSET-LEVEL PASS: If even ONE asset passes all steps, the company is
+    status="qualifying". A company is only excluded if ALL qualifying assets are eliminated.
+    Example: 14 assets screened out + 1 asset passes Step 5 → company QUALIFIES on that asset.
+    Never set status="excluded" while any single asset still has overallStatus="qualifying".
+
   — Always call drugBaseLiteCN BEFORE any web tool
   — drugBaseLiteCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
   — If still not found after retry: return inconclusive immediately, no web search
@@ -1683,6 +1688,11 @@ Layer 4 (manufacturing): run the unified Layer 4 escalation from Step 2 (L4-a th
 ONLY NOW does "stop once confident" apply: once steps 0-3 above are complete for your track,
 the budget is a ceiling, not a target — the moment you have enough to answer confidently, stop
 and return the JSON immediately rather than hunting for further confirmation beyond this.
+
+★ GOLDEN RULE — ASSET-LEVEL PASS: If even ONE asset passes all layers, the company is
+status="qualifying". A company is only excluded if ALL qualifying assets are eliminated across
+all layers. Example: 13 assets screened out + 1 asset passes every layer → company QUALIFIES.
+Never set status="excluded" while any single asset still has overallStatus="qualifying".
 
 LAYER EVALUATION:
 Evaluate Layers 1 → 2 → 5 → 3 → 4 in that order from whatever you've fetched in steps 0-3.
