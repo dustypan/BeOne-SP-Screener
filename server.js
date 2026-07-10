@@ -717,8 +717,9 @@ FLAGS — Claude sets these automatically:
   "check-mfg-partner" — set when Layer 4 manufacturing is ambiguous, budget is exhausted
     without a clear answer, or the screen could not confirm/deny a US manufacturing partner
     for at least one qualifying asset. Company still screens IN when this flag is set.
-Other flag values (green/red/blue strategic/indication/phase synergy) are assigned by the team
-in the UI, not by Claude.
+indication-synergy, phase-synergy, checkpoint-io-alt, and masked-tce-4-1bb are auto-computed
+server-side from asset data after screening — do not set these yourself.
+adc-novel-payload still requires manual autoflag (payload detail not in Pharmcube).
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -1229,12 +1230,63 @@ function matchesIndicationSynergy(text) {
 }
 
 function computePhaseSynergy(asset, ctgov) {
-  if ((asset.phase || '').toLowerCase().includes('lead opt')) return true;
+  const phase = (asset.phase || '').toLowerCase();
+  if (phase === 'preclinical' || phase.includes('preclinical')) return true;
+  if (phase.includes('2/3') || phase.includes('ii/iii')) return true;
+  if (phase === 'phase 3' || phase === 'phase iii' || phase === '3' || phase === 'iii') return true;
   if (!ctgov) return false;
   const phases = new Set(ctgov.phases || []);
   if (phases.has('PHASE2') && phases.has('PHASE3')) return true;
-  if (phases.has('PHASE2') && !phases.has('PHASE3') && ctgov.anyCompleted) return true;
+  if (phases.has('PHASE3')) return true;
   return false;
+}
+
+// Targets that qualify for checkpoint-IO-alt flag
+const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a'];
+
+// Compute flags directly from Pharmcube Steps 1+2 asset data (no web research needed).
+// Called automatically after every screening run — no manual autoflag step required
+// for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
+// adc-novel-payload and TCE masking moiety still need manual autoflag (not in Pharmcube data).
+function computeFlagsFromAsset(asset) {
+  if (!asset || asset.overallStatus === 'excluded') return [];
+  const flags = new Set();
+  const targets = (asset.targets || []).map(t => (t || '').toLowerCase());
+  const modality = (asset.modality || '').toLowerCase();
+  const phase = (asset.phase || '').toLowerCase();
+
+  // Indication synergy — keyword match on indication field
+  if (matchesIndicationSynergy(asset.indication || '')) flags.add('indication-synergy');
+
+  // Phase synergy — preclinical OR Phase 2/3 OR Phase 3
+  if (phase === 'preclinical' || phase.includes('preclinical')) flags.add('phase-synergy');
+  if (phase.includes('2/3') || phase.includes('ii/iii')) flags.add('phase-synergy');
+  if (phase === 'phase 3' || phase === 'phase iii') flags.add('phase-synergy');
+
+  // Strategic — checkpoint IO alt: non-PD1/PD-L1 checkpoint target, or bsAb/tsAb hitting PD-1/PD-L1
+  const hasPD = targets.some(t => t.includes('pd-1') || t.includes('pd-l1') || t === 'pd1' || t === 'pdl1');
+  const hasAltCheckpoint = targets.some(t => CHECKPOINT_ALT_TARGETS.some(c => t.includes(c)));
+  const isBispecificPlus = ['bsab', 'tsab'].includes(modality);
+  if (hasAltCheckpoint || (hasPD && isBispecificPlus)) flags.add('checkpoint-io-alt');
+
+  // Strategic — 4-1BB arm (TCE or bsAb/tsAb engaging 4-1BB/CD137)
+  const has41BB = targets.some(t => t.includes('4-1bb') || t.includes('cd137'));
+  if (has41BB) flags.add('masked-tce-4-1bb');
+
+  return Array.from(flags);
+}
+
+// Apply auto-flags to all qualifying assets in a screening result and bubble up to company level.
+function applyAutoFlags(result) {
+  if (!result || !result.assets) return result;
+  const companyFlags = new Set(result.flags || []);
+  for (const asset of result.assets) {
+    const derived = computeFlagsFromAsset(asset);
+    asset.flags = derived;
+    derived.forEach(f => companyFlags.add(f));
+  }
+  result.flags = Array.from(companyFlags);
+  return result;
 }
 
 // Strategic Synergy needs molecular detail (payload identity, masking moiety,
@@ -1537,6 +1589,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null) {
         /not found in pharmcube/i.test(pharmResult.inconclusiveReason || '');
 
       if (!notFound) {
+        applyAutoFlags(pharmResult);
         logScreeningBreakdown(pharmResult);
         console.log(`    [${companyName}] [FINAL] ${pharmResult.status} (pharmcube track)${pharmResult.excludedAt ? ' — excluded at ' + pharmResult.excludedAt : ''}${pharmResult.inconclusiveReason ? ' — ' + pharmResult.inconclusiveReason : ''}`);
         return pharmResult;
@@ -2070,6 +2123,7 @@ app.post('/api/screen', async (req, res) => {
     // ────────────────────────────────────────────────────────
 
     const result = await screenWithClaude(company, client, websiteUrl || null);
+    applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
     result.screenerLog = buildScreenerLog(result);
