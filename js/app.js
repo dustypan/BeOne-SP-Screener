@@ -20,6 +20,7 @@ const state = {
   beoneReviews: {},        // companyId → 'positive' | 'revisit' | 'negative' | null
   websiteInputs: {},       // companyId → url string
   skippedInconclusives: new Set(), // companyIds skipped in Ask 1 re-screen
+  resultsPage: 0,                  // current page index for results table
 
   // Filtered list (output of wizard, updated at each step)
   wizardFiltered: [],
@@ -863,6 +864,7 @@ function renderResults() {
   searchEl.value = state.searchQuery;
   searchEl.oninput = e => {
     state.searchQuery = e.target.value;
+    state.resultsPage = 0;
     renderResultsTable();
   };
 
@@ -871,6 +873,7 @@ function renderResults() {
   toggle.checked = state.hidingCompetitors;
   toggle.onchange = e => {
     state.hidingCompetitors = e.target.checked;
+    state.resultsPage = 0;
     renderResultsTable();
   };
 
@@ -885,6 +888,18 @@ function renderResults() {
   // Auto-flag high priority assets
   document.getElementById('autoflag-btn').onclick = runAutoFlag;
 
+  // Pagination
+  document.getElementById('page-prev').onclick = () => {
+    state.resultsPage = Math.max(0, state.resultsPage - 1);
+    renderResultsTable();
+    document.getElementById('results-tbody').closest('table').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  document.getElementById('page-next').onclick = () => {
+    state.resultsPage++;
+    renderResultsTable();
+    document.getElementById('results-tbody').closest('table').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   renderResultsTable();
   renderExcludedFooter();
   renderInconclusivesFooter();
@@ -898,20 +913,42 @@ function getFilteredAssets(company) {
   });
 }
 
+const RESULTS_PAGE_SIZE = 30;
+
 function renderResultsTable() {
   const tbody = document.getElementById('results-tbody');
+  const pagination = document.getElementById('results-pagination');
   const query = state.searchQuery.toLowerCase();
 
-  const companies = state.wizardFiltered.filter(c => {
+  const allCompanies = state.wizardFiltered.filter(c => {
     if (!query) return true;
     if (c.name.toLowerCase().includes(query)) return true;
     return (c.assets || []).some(a => (a.name || '').toLowerCase().includes(query));
   });
 
-  if (companies.length === 0) {
+  if (allCompanies.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">No qualifying companies match your current filters.</td></tr>`;
     updateResultsCount(0);
+    if (pagination) pagination.classList.add('hidden');
     return;
+  }
+
+  const totalPages = Math.ceil(allCompanies.length / RESULTS_PAGE_SIZE);
+  state.resultsPage = Math.max(0, Math.min(state.resultsPage, totalPages - 1));
+  const start = state.resultsPage * RESULTS_PAGE_SIZE;
+  const companies = allCompanies.slice(start, start + RESULTS_PAGE_SIZE);
+
+  // Pagination controls
+  if (pagination) {
+    if (totalPages > 1) {
+      pagination.classList.remove('hidden');
+      document.getElementById('page-indicator').textContent =
+        `Page ${state.resultsPage + 1} of ${totalPages} (${allCompanies.length} companies)`;
+      document.getElementById('page-prev').disabled = state.resultsPage === 0;
+      document.getElementById('page-next').disabled = state.resultsPage >= totalPages - 1;
+    } else {
+      pagination.classList.add('hidden');
+    }
   }
 
   let html = '';
