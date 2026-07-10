@@ -283,7 +283,7 @@ const PHARMCUBE_TOOLS = [
       properties: {
         companyName: { type: 'string', description: 'Company name to search (English or Chinese accepted)' },
         pageNo: { type: 'number', description: 'Page number, 0-indexed (use 0 for first page)' },
-        pageSize: { type: 'number', description: 'Results per page (use 20)', enum: [1, 5, 10, 20, 50] },
+        pageSize: { type: 'number', description: 'Results per page. Use 20 for page 0, then 10 for page 1 if totalCount > 20. Never paginate past page 1.', enum: [1, 5, 10, 20, 50] },
         drugType2: { type: 'array', items: { type: 'string' }, description: 'Filter by drug category. ALWAYS pass ["生物"] to return only biologics and avoid charges for small molecules.' },
         diseaseArea: { type: 'string', description: 'Filter by disease area. ALWAYS pass "肿瘤领域" to return only oncology assets and avoid charges for non-oncology.' },
         status: { type: 'array', items: { type: 'string' }, description: 'Filter by development status. ALWAYS pass ["Active","Unknown"] to exclude Inactive (abandoned) assets.' },
@@ -742,6 +742,11 @@ Call drugBaseLiteCN with:
   diseaseArea = "肿瘤领域"    ← oncology only (avoids charges for non-oncology assets)
   status = ["Active","Unknown"] ← exclude Inactive (abandoned) assets upfront
 
+If the response contains a totalCount > 20, make EXACTLY ONE additional call:
+  pageNo = 1, pageSize = 10  ← gets records 21–30 (max 10 more × 15 pts = 150 pts)
+  (same filters: drugType2, diseaseArea, status)
+Do NOT paginate beyond page 1 regardless of totalCount. Cap = 30 records total.
+
 Filter results to qualifying assets where ALL of:
   (a) disease_area contains oncology/tumor indication
       — 肿瘤领域, 肿瘤, tumor, cancer, leukemia, lymphoma, carcinoma, sarcoma, etc.
@@ -779,9 +784,13 @@ OUTCOMES from Steps 1+2:
       Sanity check: if results come back, confirm that the company name field in at least one
       result plausibly matches the original query (shared word root, Chinese name phonetically
       similar, or English alias). If no plausible match, treat as not found.
-      If still zero results after the one retry → return: status="inconclusive",
-      inconclusiveReason="Company not found in Pharmcube — route to secondary track".
-      Total cap: 2 drugBaseLiteCN calls. Do NOT try web searches.
+      If still zero results after the one retry → DISAMBIGUATION STEP before routing to secondary:
+        Make ONE more call: drugBaseLiteCN with companyName only (NO drugType2, NO diseaseArea filters), pageSize: 1.
+        — If this returns ≥1 result → company EXISTS in Pharmcube, just has no oncology biologics
+            → return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube (company exists but pipeline is non-oncology or non-biologic)"
+        — If this also returns 0 → company genuinely not in Pharmcube
+            → return: status="inconclusive", inconclusiveReason="Company not found in Pharmcube — route to secondary track"
+      Total cap: 3 drugBaseLiteCN calls (2 filtered + 1 unfiltered existence check). Do NOT try web searches.
   (B) Results found, ≥1 qualifying oncology biologic asset → proceed to Step 3
   (C) Results found, zero qualifying assets (all non-oncology, all small-molecule, all excluded modalities, or all Inactive) →
       Return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube"
