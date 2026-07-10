@@ -1388,6 +1388,21 @@ Return ONLY this JSON, nothing else:
 // contains "not found in Pharmcube", the caller should run the secondary track.
 // ─────────────────────────────────────────────────────────────
 
+const PHARMCUBE_CREDIT_CAP = 450;
+const PHARMCUBE_UNIT_PRICES = { drugBaseLiteCN: 15, drugDeal: 18 };
+
+function estimatePharmcubeCallCost(toolName, output) {
+  const price = PHARMCUBE_UNIT_PRICES[toolName];
+  if (!price) return 0;
+  try {
+    const parsed = JSON.parse(output);
+    for (const val of Object.values(parsed)) {
+      if (Array.isArray(val)) return val.length * price;
+    }
+  } catch (_) {}
+  return 0;
+}
+
 async function screenWithPharmcubePrimary(companyName, client) {
   const messages = [{
     role: 'user',
@@ -1398,6 +1413,7 @@ async function screenWithPharmcubePrimary(companyName, client) {
   const collectedSources = [];
   const fetchedUrls = [];
   const evidenceSnapshots = [];
+  let pharmcubeCreditsUsed = 0;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
@@ -1482,6 +1498,8 @@ async function screenWithPharmcubePrimary(companyName, client) {
         try {
           if (toolUse.name === 'drugBaseLiteCN' || toolUse.name === 'drugDeal') {
             output = await callPharmcubeTool(toolUse.name, toolUse.input);
+            pharmcubeCreditsUsed += estimatePharmcubeCallCost(toolUse.name, output);
+            console.log(`    [${companyName}] [pharmcube] [credits] ~${pharmcubeCreditsUsed} pts used so far`);
           } else if (toolUse.name === 'fetch_webpage') {
             fetchedUrls.push(toolUse.input.url);
             output = await fetchWebpage(toolUse.input.url, toolUse.input.section);
@@ -1493,6 +1511,30 @@ async function screenWithPharmcubePrimary(companyName, client) {
           output = `Tool error: ${e.message}`;
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
+
+        if (pharmcubeCreditsUsed > PHARMCUBE_CREDIT_CAP) {
+          console.log(`    [${companyName}] [pharmcube] [cap] Credit cap exceeded (~${pharmcubeCreditsUsed} pts) — returning inconclusive`);
+          return {
+            name: companyName,
+            id: slugify(companyName),
+            type: 'unknown',
+            website: null,
+            status: 'inconclusive',
+            sourceTrack: 'pharmcube',
+            excludedAt: null,
+            excludedReason: '',
+            inconclusiveReason: `Pharmcube credit cap exceeded (~${pharmcubeCreditsUsed} pts for this company) — user input needed`,
+            assets: [],
+            beoneAnalyzed: false,
+            beoneOutcome: null,
+            flags: [],
+            externalSourcing: false,
+            externalSources: [],
+            researchNotes: '',
+            allSourcesConsulted: [...new Set(fetchedUrls)],
+            evidenceSnapshots,
+          };
+        }
       }
 
       messages.push({ role: 'user', content: toolResults });
