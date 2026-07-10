@@ -1548,7 +1548,8 @@ function matchesBigPharma(companyName) {
 // Claude API call with tool loop
 // ─────────────────────────────────────────────────────────────
 
-async function screenWithClaude(companyName, client, websiteUrl = null) {
+async function screenWithClaude(companyName, client, websiteUrl = null, opts = {}) {
+  const { skipPharmcube = false } = opts;
   // Step 0 first — instant, no research needed, per the plan. Skips the Claude
   // call entirely for an obvious Big Pharma match.
   const bigPharmaMatch = matchesBigPharma(companyName);
@@ -1573,7 +1574,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null) {
 
   // ── PRIMARY TRACK: Pharmcube MCP ──────────────────────────────────────────────
   const pharmcubeApiKey = process.env.PHARMCUBE_API_KEY || process.env.pharmcube_api_key;
-  if (pharmcubeApiKey) {
+  if (pharmcubeApiKey && !skipPharmcube) {
     console.log(`    [${companyName}] [primary-track] Pharmcube MCP`);
     let pharmResult;
     try {
@@ -2096,7 +2097,7 @@ app.get('/api/runs/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 app.post('/api/screen', async (req, res) => {
-  const { company, runId, websiteUrl } = req.body;
+  const { company, runId, websiteUrl, skipPharmcube } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company name' });
 
   const apiKey = req.headers['x-api-key'] ||
@@ -2122,7 +2123,7 @@ app.post('/api/screen', async (req, res) => {
     }
     // ────────────────────────────────────────────────────────
 
-    const result = await screenWithClaude(company, client, websiteUrl || null);
+    const result = await screenWithClaude(company, client, websiteUrl || null, { skipPharmcube: !!skipPharmcube });
     applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);

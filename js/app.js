@@ -19,6 +19,7 @@ const state = {
   selectedTargetIds: new Set(),
   beoneReviews: {},        // companyId → 'positive' | 'revisit' | 'negative' | null
   websiteInputs: {},       // companyId → url string
+  skippedInconclusives: new Set(), // companyIds skipped in Ask 1 re-screen
 
   // Filtered list (output of wizard, updated at each step)
   wizardFiltered: [],
@@ -487,16 +488,25 @@ function renderAsk1() {
 
   if (noInput) noInput.classList.add('hidden');
 
-  container.innerHTML = allInconclusive.map(c => `
-    <div class="url-row">
+  container.innerHTML = allInconclusive.map(c => {
+    const isSkipped = state.skippedInconclusives.has(c.id);
+    const notFoundInPharmcube = /not found in pharmcube/i.test(c.inconclusiveReason || '');
+    return `
+    <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
       <span class="url-reason">${escHtml(c.inconclusiveReason || 'Inconclusive')}</span>
+      ${notFoundInPharmcube
+        ? `<span class="url-note">⚡ Will use URL you provide — Pharmcube skipped</span>`
+        : ''}
       <input type="url" class="url-input" placeholder="https://… (optional)"
         value="${escHtml(state.websiteInputs[c.id] || '')}"
-        data-id="${escHtml(c.id)}">
-      <button class="btn-text url-skip" data-id="${escHtml(c.id)}">Clear</button>
-    </div>
-  `).join('');
+        data-id="${escHtml(c.id)}"
+        ${isSkipped ? 'disabled' : ''}>
+      <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">
+        ${isSkipped ? '↩ Unskip' : 'Skip'}
+      </button>
+    </div>`;
+  }).join('');
 
   container.querySelectorAll('.url-input').forEach(input => {
     input.addEventListener('input', e => {
@@ -505,19 +515,33 @@ function renderAsk1() {
     });
   });
 
-  container.querySelectorAll('.url-skip').forEach(btn => {
+  container.querySelectorAll('.btn-skip-inconclusive').forEach(btn => {
     btn.addEventListener('click', () => {
-      delete state.websiteInputs[btn.dataset.id];
-      saveWebsiteInputs();
-      const input = container.querySelector(`.url-input[data-id="${CSS.escape(btn.dataset.id)}"]`);
-      if (input) input.value = '';
+      const id = btn.dataset.id;
+      const row = container.querySelector(`.url-row[data-id="${CSS.escape(id)}"]`);
+      const input = container.querySelector(`.url-input[data-id="${CSS.escape(id)}"]`);
+      if (state.skippedInconclusives.has(id)) {
+        state.skippedInconclusives.delete(id);
+        btn.textContent = 'Skip';
+        btn.classList.remove('is-skipped');
+        if (row) row.classList.remove('url-row-skipped');
+        if (input) input.disabled = false;
+      } else {
+        state.skippedInconclusives.add(id);
+        btn.textContent = '↩ Unskip';
+        btn.classList.add('is-skipped');
+        if (row) row.classList.add('url-row-skipped');
+        if (input) input.disabled = true;
+      }
     });
   });
 }
 
 // Re-screen all inconclusive companies before proceeding to Ask 2
 async function runRescreening() {
-  const inconclusives = state.categories.inconclusive;
+  const allInconclusives = state.categories.inconclusive;
+  // Exclude companies the user explicitly skipped
+  const inconclusives = allInconclusives.filter(c => !state.skippedInconclusives.has(c.id));
   if (inconclusives.length === 0) return;
 
   showSection('section-rescreening');
@@ -532,6 +556,10 @@ async function runRescreening() {
 
   async function rescreenOne(company) {
     const websiteUrl = state.websiteInputs[company.id] || company.website || null;
+    // If the company wasn't found in Pharmcube during the first run, skip Pharmcube
+    // and go straight to secondary track with the user-provided URL
+    const notFoundInPharmcube = /not found in pharmcube/i.test(company.inconclusiveReason || '');
+    const skipPharmcube = notFoundInPharmcube;
     try {
       const resp = await fetch('/api/screen', {
         method: 'POST',
@@ -540,6 +568,7 @@ async function runRescreening() {
           company: company.name,
           runId: state.currentRunId,
           websiteUrl,
+          skipPharmcube,
         }),
       });
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
