@@ -871,34 +871,6 @@ a:hover { text-decoration: underline; }
   border-top: 1px solid var(--gray-200);
 }
 
-/* ── Results Pagination ───────────────────────────────────── */
-.results-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 16px 0 8px;
-}
-.btn-page {
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  border: 1px solid var(--gray-300);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.btn-page:hover:not(:disabled) { background: var(--gray-100); }
-.btn-page:disabled { opacity: 0.35; cursor: default; }
-#page-indicator {
-  font-size: 13px;
-  color: var(--text-muted);
-  min-width: 180px;
-  text-align: center;
-}
-
 /* ── Results Section ──────────────────────────────────────── */
 .results-toolbar {
   display: flex;
