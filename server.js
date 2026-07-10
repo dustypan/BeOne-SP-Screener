@@ -1653,6 +1653,12 @@ the right company and to locate its website/ticker/listing.
       guess, do not fill gaps from weaker sources. Return status: "inconclusive",
       inconclusiveReason: "Website Input Needed" immediately — this company should cost no more
       than ~30 seconds of research; further digging isn't worth it.
+    - SPECIAL CASE — website found but unreadable: if fetch_webpage returns "Page content appears
+      empty (likely JavaScript-rendered)" or an HTTP error (403/429/timeout) for the company's
+      main site AND the external sourcing fallback (press releases, abstracts) also fails to give
+      enough for Layers 1-2, set inconclusiveReason: "Website Unreadable — JS-rendered or access
+      blocked" (NOT "Website Input Needed"). This signals to the team that a URL isn't needed —
+      the site exists, it just can't be read by the screener.
 
 STEP 0b — Oncology pre-filter (quick scan, from whatever you fetched in 0a):
 Confirm it's the right company. Does this company have ANY oncology program, anywhere on the

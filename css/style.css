@@ -821,6 +821,26 @@ a:hover { text-decoration: underline; }
   color: var(--blue);
   flex-shrink: 0;
 }
+.url-note-warn {
+  color: #b45309;
+}
+
+.badge-unreadable {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  flex-shrink: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .badge-unreadable { background: #451a03; color: #fcd34d; }
+}
+:root[data-theme="dark"] .badge-unreadable { background: #451a03; color: #fcd34d; }
 
 .btn-skip-inconclusive {
   flex-shrink: 0;

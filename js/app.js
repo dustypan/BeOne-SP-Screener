@@ -382,9 +382,24 @@ function renderSummary() {
     const at = c.excludedAt ? ` (Layer ${c.excludedAt.replace('layer', '')})` : c.excludedAt === 'pre-filter' ? ' (Pre-filter)' : '';
     return (c.excludedReason || 'Screened out') + at;
   });
-  renderBucketList('list-inconclusive', inconclusive, c =>
-    c.inconclusiveReason || 'Inconclusive'
-  );
+  // Inconclusive bucket — inline render so we can add the "unreadable" badge
+  (function() {
+    const el = document.getElementById('list-inconclusive');
+    if (!el) return;
+    if (inconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
+    el.innerHTML = inconclusive.map(c => {
+      const reason = c.inconclusiveReason || 'Inconclusive';
+      const isUnreadable = /website unreadable/i.test(reason);
+      const badge = isUnreadable
+        ? '<span class="badge-unreadable">🔒 Unreadable</span>'
+        : '';
+      return `<div class="bucket-item">
+        <span class="bucket-company">${escHtml(c.name)}</span>
+        ${badge}
+        <span class="bucket-reason">${escHtml(reason)}</span>
+      </div>`;
+    }).join('');
+  })();
 }
 
 function setCount(id, n) {
@@ -497,7 +512,9 @@ function renderAsk1() {
       <span class="url-reason">${escHtml(c.inconclusiveReason || 'Inconclusive')}</span>
       ${notFoundInPharmcube
         ? `<span class="url-note">⚡ Will use URL you provide — Pharmcube skipped</span>`
-        : ''}
+        : /website unreadable/i.test(c.inconclusiveReason || '')
+          ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL or skip</span>`
+          : ''}
       <input type="url" class="url-input" placeholder="https://… (optional)"
         value="${escHtml(state.websiteInputs[c.id] || '')}"
         data-id="${escHtml(c.id)}"
