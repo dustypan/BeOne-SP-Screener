@@ -129,7 +129,7 @@ function categorize(companies) {
   for (const c of companies) {
     if (c.status === 'excluded') {
       excluded.push(c);
-    } else if (c.status === 'inconclusive') {
+    } else if (c.status === 'inconclusive' || c.status === 'paused') {
       inconclusive.push(c);
     } else if (c.status === 'qualifying') {
       // A company qualifies if it has at least one asset that passes all layers including L5

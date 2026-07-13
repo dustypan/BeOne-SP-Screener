@@ -861,6 +861,28 @@ a:hover { text-decoration: underline; }
   border-color: var(--blue);
 }
 
+.url-row-paused {
+  background: var(--amber-lt);
+  border-left: 3px solid var(--amber);
+}
+
+.btn-continue-screen {
+  background: var(--amber);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.btn-continue-screen:hover { opacity: 0.85; }
+.btn-continue-screen:disabled { opacity: 0.55; cursor: not-allowed; }
+
+tr.row-paused td { background: var(--amber-lt); }
+
 /* Wizard navigation */
 .wizard-nav {
   display: flex;

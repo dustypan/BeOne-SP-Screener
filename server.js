@@ -1412,17 +1412,38 @@ function estimatePharmcubeCallCost(toolName, output) {
   return 0;
 }
 
-async function screenWithPharmcubePrimary(companyName, client) {
-  const messages = [{
-    role: 'user',
-    content: `Screen this company through the Pharmcube primary track: "${companyName}"\n\nStart immediately by calling drugBaseLiteCN. Do not run web_search first.`,
-  }];
+async function screenWithPharmcubePrimary(companyName, client, opts = {}) {
+  const { resumeFromState } = opts;
+  const skipCreditCap = !!resumeFromState;
+
+  let initialContent;
+  if (resumeFromState) {
+    const historyText = (resumeFromState.callHistory || []).map((call, i) =>
+      `[Call ${i + 1} — ${call.toolName}(${JSON.stringify(call.input).slice(0, 80)})]\n${call.rawOutput}`
+    ).join('\n\n');
+    initialContent =
+      `Screen this company through the Pharmcube primary track: "${companyName}"\n\n` +
+      `=== RESUME FROM CREDIT CAP PAUSE ===\n` +
+      `The user approved continuing past the credit cap. Do NOT call drugBaseLiteCN again — ` +
+      `that data was already fetched and is provided below. You may still call drugDeal if ` +
+      `Steps 1+2 identified qualifying assets and drugDeal is NOT already in the history below. ` +
+      `Step 5 web research tools remain available as normal. The per-company credit cap is suspended.\n\n` +
+      `Previous Pharmcube API calls:\n${historyText}\n\n` +
+      `Credits already used: ~${resumeFromState.creditsUsed} pts.\n` +
+      `=== END RESUME DATA ===\n\n` +
+      `Start at STEP 3 (Competitive Overlap) using the drug data above, then proceed to Steps 4 and 5 normally.`;
+  } else {
+    initialContent = `Screen this company through the Pharmcube primary track: "${companyName}"\n\nStart immediately by calling drugBaseLiteCN. Do not run web_search first.`;
+  }
+
+  const messages = [{ role: 'user', content: initialContent }];
 
   const MAX_ITERATIONS = 14;
   const collectedSources = [];
   const fetchedUrls = [];
   const evidenceSnapshots = [];
-  let pharmcubeCreditsUsed = 0;
+  let pharmcubeCreditsUsed = resumeFromState ? (resumeFromState.creditsUsed || 0) : 0;
+  const pharmcubeCallHistory = [];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
@@ -1507,6 +1528,7 @@ async function screenWithPharmcubePrimary(companyName, client) {
         try {
           if (toolUse.name === 'drugBaseLiteCN' || toolUse.name === 'drugDeal') {
             output = await callPharmcubeTool(toolUse.name, toolUse.input);
+            pharmcubeCallHistory.push({ toolName: toolUse.name, input: toolUse.input, rawOutput: output });
             pharmcubeCreditsUsed += estimatePharmcubeCallCost(toolUse.name, output);
             console.log(`    [${companyName}] [pharmcube] [credits] ~${pharmcubeCreditsUsed} pts used so far`);
           } else if (toolUse.name === 'fetch_webpage') {
@@ -1521,18 +1543,20 @@ async function screenWithPharmcubePrimary(companyName, client) {
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
 
-        if (pharmcubeCreditsUsed > PHARMCUBE_CREDIT_CAP) {
-          console.log(`    [${companyName}] [pharmcube] [cap] Credit cap exceeded (~${pharmcubeCreditsUsed} pts) — returning inconclusive`);
+        if (!skipCreditCap && pharmcubeCreditsUsed > PHARMCUBE_CREDIT_CAP) {
+          console.log(`    [${companyName}] [pharmcube] [cap] Credit cap exceeded (~${pharmcubeCreditsUsed} pts) — pausing for user`);
           return {
             name: companyName,
             id: slugify(companyName),
             type: 'unknown',
             website: null,
-            status: 'inconclusive',
+            status: 'paused',
             sourceTrack: 'pharmcube',
             excludedAt: null,
             excludedReason: '',
-            inconclusiveReason: `Pharmcube credit cap exceeded (~${pharmcubeCreditsUsed} pts for this company) — user input needed`,
+            inconclusiveReason: `Pharmcube credit cap reached (~${pharmcubeCreditsUsed} pts) — click Continue to proceed`,
+            creditsUsed: pharmcubeCreditsUsed,
+            pausedState: { callHistory: pharmcubeCallHistory, creditsUsed: pharmcubeCreditsUsed },
             assets: [],
             beoneAnalyzed: false,
             beoneOutcome: null,
@@ -2218,6 +2242,46 @@ app.post('/api/screen', async (req, res) => {
       beoneOutcome: null,
       flags: [],
       researchNotes: errMsg,
+    };
+    errorResult.screenerLog = buildScreenerLog(errorResult);
+    if (runId) saveCompanyToDb(runId, errorResult);
+    res.json(errorResult);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Resume endpoint — continue a company that was paused at the credit cap.
+// The client sends back the pausedState (call history + credits used) so
+// Claude can pick up at Step 3 without re-calling Pharmcube.
+// ─────────────────────────────────────────────────────────────
+app.post('/api/screen/resume', async (req, res) => {
+  const { company, runId, pausedState } = req.body;
+  if (!company || !pausedState) return res.status(400).json({ error: 'Missing company or pausedState' });
+
+  const apiKey = req.headers['x-api-key'] ||
+    process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured' });
+
+  console.log(`\n${'─'.repeat(60)}\n[${company}] RESUME from credit cap (~${pausedState.creditsUsed} pts used)\n${'─'.repeat(60)}`);
+
+  try {
+    const client = new Anthropic({ apiKey, maxRetries: 5 });
+    const result = await screenWithPharmcubePrimary(company, client, { resumeFromState: pausedState });
+    applyAutoFlags(result);
+    logScreeningBreakdown(result);
+    result.screenerLog = buildScreenerLog(result);
+    if (runId) saveCompanyToDb(runId, result);
+    res.json(result);
+  } catch (err) {
+    console.error(`  [${company}] ✗ resume error: ${err.message}`);
+    const errorResult = {
+      name: company,
+      id: slugify(company),
+      status: 'inconclusive',
+      inconclusiveReason: `Resume error: ${err.message}`,
+      assets: [],
+      flags: [],
+      sourceTrack: 'pharmcube',
     };
     errorResult.screenerLog = buildScreenerLog(errorResult);
     if (runId) saveCompanyToDb(runId, errorResult);

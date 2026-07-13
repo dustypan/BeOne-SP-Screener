@@ -504,8 +504,18 @@ function renderAsk1() {
   if (noInput) noInput.classList.add('hidden');
 
   container.innerHTML = allInconclusive.map(c => {
+    const isPaused = c.status === 'paused';
     const isSkipped = state.skippedInconclusives.has(c.id);
     const notFoundInPharmcube = /not found in pharmcube/i.test(c.inconclusiveReason || '');
+    if (isPaused) {
+      return `
+    <div class="url-row url-row-paused" data-id="${escHtml(c.id)}">
+      <span class="url-company">${escHtml(c.name)}</span>
+      <span class="url-reason">${escHtml(c.inconclusiveReason || 'Credit cap reached')}</span>
+      <span class="url-note url-note-warn">⚡ Pharmcube data saved — no re-billing needed to continue</span>
+      <button class="btn-continue-screen" data-id="${escHtml(c.id)}">Continue anyway</button>
+    </div>`;
+    }
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
@@ -552,6 +562,49 @@ function renderAsk1() {
       }
     });
   });
+
+  container.querySelectorAll('.btn-continue-screen').forEach(btn => {
+    btn.addEventListener('click', () => continueCompanyScreening(btn.dataset.id));
+  });
+}
+
+// Continue a company that was paused at the Pharmcube credit cap.
+// Uses the saved call history so Pharmcube is NOT re-billed.
+async function continueCompanyScreening(companyId) {
+  const company = state.companies.find(c => c.id === companyId);
+  if (!company || !company.pausedState) return;
+
+  const row = document.querySelector(`#ask1-companies .url-row[data-id="${CSS.escape(companyId)}"]`);
+  const btn = row && row.querySelector('.btn-continue-screen');
+  if (btn) { btn.textContent = 'Running…'; btn.disabled = true; }
+
+  try {
+    const resp = await fetch('/api/screen/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+      body: JSON.stringify({
+        company: company.name,
+        runId: state.currentRunId,
+        pausedState: company.pausedState,
+      }),
+    });
+    if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+    const result = await resp.json();
+    for (const asset of result.assets || []) {
+      asset.layer5 = computeLayer5(asset);
+    }
+    if (state.beoneReviews[result.id] != null) {
+      result.beoneOutcome = state.beoneReviews[result.id];
+      result.beoneAnalyzed = true;
+    }
+    const idx = state.companies.findIndex(c => c.id === companyId);
+    if (idx !== -1) state.companies[idx] = result;
+    state.categories = categorize(state.companies);
+    state.wizardFiltered = [...state.categories.qualifying];
+    renderAsk1();
+  } catch (err) {
+    if (btn) { btn.textContent = 'Error — retry'; btn.disabled = false; }
+  }
 }
 
 // Re-screen all inconclusive companies before proceeding to Ask 2
@@ -1241,6 +1294,7 @@ function renderInconclusivesFooter() {
 
   section.classList.remove('hidden');
   tbody.innerHTML = items.map(c => {
+    const isPaused = c.status === 'paused';
     let sourceCell = '—';
     if (c.website) {
       sourceCell = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
@@ -1248,12 +1302,16 @@ function renderInconclusivesFooter() {
       sourceCell = `<a href="${escHtml(state.websiteInputs[c.id])}" target="_blank" rel="noopener">user input ↗</a>`;
     }
     return `
-      <tr>
+      <tr${isPaused ? ' class="row-paused"' : ''}>
         <td>${escHtml(c.name)}</td>
         <td>${escHtml(c.inconclusiveReason || '—')}</td>
         <td>${sourceCell}</td>
         <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
-        <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
+        <td>
+          ${isPaused && c.pausedState
+            ? `<button class="btn-continue-screen btn-continue-results" data-id="${escHtml(c.id)}">Continue</button>`
+            : `<button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button>`}
+        </td>
       </tr>
     `;
   }).join('');
@@ -1267,6 +1325,16 @@ function renderInconclusivesFooter() {
 
   tbody.querySelectorAll('.btn-sources-view').forEach(btn => {
     btn.addEventListener('click', () => openSourcesModal(btn.dataset.coId));
+  });
+
+  tbody.querySelectorAll('.btn-continue-results').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.textContent = 'Running…';
+      btn.disabled = true;
+      await continueCompanyScreening(btn.dataset.id);
+      renderInconclusivesFooter();
+      renderResults();
+    });
   });
 }
 
