@@ -1115,6 +1115,89 @@ async function callPharmcubeTool(toolName, toolArgs) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// OneBD REST API helper
+// Base URL: https://onebd.pchomelab.com/api/v1
+// Auth:     X-API-Key header
+// ─────────────────────────────────────────────────────────────
+
+const ONEBD_BASE = 'https://onebd.pchomelab.com/api/v1';
+
+function getOneBdKey() {
+  return process.env.ONEBD_API_KEY || process.env.onebd_api_key;
+}
+
+async function callOneBdApi(path, method = 'GET', body = null) {
+  const apiKey = getOneBdKey();
+  if (!apiKey) throw new Error('ONEBD_API_KEY not set');
+
+  const url = `${ONEBD_BASE}${path}`;
+  const opts = {
+    method,
+    headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    timeout: 30000,
+  };
+  if (body) opts.data = body;
+
+  try {
+    const resp = await axios({ url, ...opts });
+    return resp.data;
+  } catch (e) {
+    const status = e.response?.status;
+    const detail = e.response?.data?.detail || e.message;
+    throw new Error(`OneBD ${method} ${path} → ${status || 'network'}: ${detail}`);
+  }
+}
+
+// Thin wrappers — each returns the parsed JSON response object.
+
+function oneBdCounts() {
+  return callOneBdApi('/counts');
+}
+
+function oneBdSearch(query, opts = {}) {
+  return callOneBdApi('/search', 'POST', {
+    query,
+    datasets: opts.datasets || ['deals', 'assets', 'companies', 'clinical_trials', 'edgar', 'contracts'],
+    company_id: opts.company_id || undefined,
+    date_from: opts.date_from || undefined,
+    date_to: opts.date_to || undefined,
+    limit_per_dataset: opts.limit_per_dataset || 10,
+  });
+}
+
+function oneBdDealsSearch(params = {}) {
+  return callOneBdApi('/deals/search', 'POST', params);
+}
+
+function oneBdAssetsSearch(params = {}) {
+  return callOneBdApi('/assets/search', 'POST', params);
+}
+
+function oneBdEdgarSearch(params = {}) {
+  return callOneBdApi('/edgar/search', 'POST', params);
+}
+
+function oneBdContractsSearch(params = {}) {
+  return callOneBdApi('/contracts/search', 'POST', params);
+}
+
+function oneBdLiteratureSearch(params = {}) {
+  return callOneBdApi('/literature/search', 'POST', params);
+}
+
+function oneBdClinicalTrialsSearch(params = {}) {
+  return callOneBdApi('/clinical-trials/search', 'POST', params);
+}
+
+function oneBdCompanyDossier(companyId) {
+  return callOneBdApi(`/companies/${companyId}/dossier`);
+}
+
+function oneBdAssetDossier(assetId) {
+  return callOneBdApi(`/assets/${assetId}/dossier`);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Public/private determination + 10-K lookup via SEC EDGAR
 // ─────────────────────────────────────────────────────────────
 
