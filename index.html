@@ -146,7 +146,7 @@
       <!-- Qualifying -->
       <div class="bucket-card qualifying">
         <div class="bucket-head">
-          <div class="bucket-icon">Q</div>
+          <div class="bucket-icon">&#10003;</div>
           <div class="bucket-label">
             <div class="bucket-label-title">Qualifying</div>
             <div class="bucket-count" id="count-qualifying">0</div>
@@ -277,6 +277,11 @@
       <button id="export-csv-btn" class="btn-outline">⬇ Export CSV</button>
     </div>
 
+    <div class="results-section-label qualifying">
+      <div class="rsl-icon">&#10003;</div>
+      <span class="rsl-title">Qualifying</span>
+    </div>
+
     <div class="results-table-wrap">
       <table class="results-table">
         <thead>
@@ -304,7 +309,10 @@
 
     <!-- Excluded footer -->
     <div id="excluded-footer" class="hidden">
-      <h3>✗ Excluded</h3>
+      <div class="results-section-label excluded">
+        <div class="rsl-icon">&#10007;</div>
+        <span class="rsl-title">Excluding</span>
+      </div>
       <div class="results-table-wrap">
         <table class="results-table">
           <thead>
@@ -324,7 +332,10 @@
 
     <!-- Inconclusives footer -->
     <div id="inconclusives-footer" class="hidden">
-      <h3>⚠ Unresolved Inconclusives</h3>
+      <div class="results-section-label inconclusive">
+        <div class="rsl-icon">?</div>
+        <span class="rsl-title">Inconclusive</span>
+      </div>
       <div class="results-table-wrap">
         <table class="results-table">
           <thead>

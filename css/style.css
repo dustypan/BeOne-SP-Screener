@@ -2067,3 +2067,43 @@ details[open] > .evidence-snapshots-header::before { content: '▼ '; }
   color: var(--text-muted);
   max-width: 320px;
 }
+
+/* ── Results page section labels (Qualifying / Excluding / Inconclusive) ──── */
+.results-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 10px;
+  padding: 0;
+}
+
+.results-section-label .rsl-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.results-section-label .rsl-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.results-section-label.qualifying .rsl-icon  { background: var(--green-lt); color: var(--green); }
+.results-section-label.qualifying .rsl-title { color: var(--green); }
+
+.results-section-label.excluded .rsl-icon  { background: var(--red-lt); color: var(--red); }
+.results-section-label.excluded .rsl-title { color: var(--red); }
+
+.results-section-label.inconclusive .rsl-icon  { background: var(--amber-lt); color: var(--amber); }
+.results-section-label.inconclusive .rsl-title { color: var(--amber); }
+
+#section-results .results-section-label.qualifying {
+  margin-top: 16px;
+}
