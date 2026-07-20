@@ -30,6 +30,10 @@ const state = {
 
   // Current screening run (DB-backed)
   currentRunId: null,
+
+  // Run console — accumulates log lines during a screening run
+  runLog: [],
+  runLogOpen: false,
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -218,6 +222,8 @@ async function runScreener(names) {
   bar.style.width = '0%';
   bar.classList.add('progress-starting');
   label.textContent = 'Starting…';
+  state.runLog = [];
+  appendToRunLog(`Run started — ${names.length} compan${names.length === 1 ? 'y' : 'ies'} to screen`);
 
   // Create a run record in the DB to track this session
   state.currentRunId = null;
@@ -255,6 +261,16 @@ async function runScreener(names) {
     });
   }
 
+  function appendToRunLog(line) {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    state.runLog.push(`[${ts}] ${line}`);
+    // If console modal is open, refresh it live
+    if (state.runLogOpen) {
+      const pre = document.getElementById('console-modal-log');
+      if (pre) { pre.textContent = state.runLog.join('\n'); pre.scrollTop = pre.scrollHeight; }
+    }
+  }
+
   async function screenOne(i) {
     const name = names[i];
 
@@ -267,8 +283,10 @@ async function runScreener(names) {
         cached.beoneAnalyzed = true;
       }
       companies[i] = cached;
+      appendToRunLog(`✓ ${name} — recalled from repository (${(cached.assets||[]).length} asset(s))`);
     } else {
       // Not yet screened — start job then stream result via SSE (avoids proxy 502)
+      appendToRunLog(`▶ ${name} — screening started`);
       try {
         const startResp = await fetch('/api/screen', {
           method: 'POST',
@@ -293,7 +311,21 @@ async function runScreener(names) {
         }
 
         companies[i] = result;
+        // Log result summary to run console
+        const assetCount = (result.assets || []).length;
+        const statusIcon = result.status === 'qualifying' ? '✓' : result.status === 'excluded' ? '✗' : '⚠';
+        const dealInfo = (result.deals || []).length ? ` | ${result.deals.length} deal(s)` : '';
+        const layerInfo = (() => {
+          const a = (result.assets || [])[0];
+          if (!a) return '';
+          const layers = ['layer1','layer2','layer3','layer4','layer5'];
+          const summary = layers.map(l => a[l] ? `${l.replace('layer','L')}:${a[l].status||'?'}` : '').filter(Boolean).join(' ');
+          return summary ? ` | ${summary}` : '';
+        })();
+        appendToRunLog(`${statusIcon} ${name} — ${result.status} | ${assetCount} asset(s)${dealInfo}${layerInfo}`);
+        if (result.screenerLog) appendToRunLog(`  Rationale: ${result.screenerLog.split('\n')[0]}`);
       } catch (err) {
+        appendToRunLog(`✗ ${name} — ERROR: ${err.message}`);
         // Server not running or network error
         const isConnectionError = err.message.includes('fetch') || err.message.includes('Failed') || err.message.includes('NetworkError');
         companies[i] = {
@@ -344,6 +376,7 @@ function finishScreening(companies) {
   state.companies = companies;
   state.categories = categorize(companies);
   state.wizardFiltered = [...state.categories.qualifying];
+  state._flagsDoneForRun = false; // allow auto-flag to run once when results open
 
   renderSummary();
   showSection('section-summary');
@@ -929,8 +962,27 @@ function renderResults() {
     showSection('section-wizard');
   };
 
-  // Auto-flag high priority assets
-  document.getElementById('autoflag-btn').onclick = runAutoFlag;
+  // Run Console button
+  const consoleBtn = document.getElementById('run-console-btn');
+  if (consoleBtn) {
+    consoleBtn.onclick = () => {
+      state.runLogOpen = true;
+      const log = state.runLog.length ? state.runLog.join('\n') : '(No run in progress yet)';
+      openConsoleModal('Run Console', log);
+      // Keep updating while open
+      const modalEl = document.getElementById('console-modal');
+      const pre = document.getElementById('console-modal-log');
+      const closeHandler = () => { state.runLogOpen = false; };
+      document.getElementById('close-console-btn').addEventListener('click', closeHandler, { once: true });
+      document.getElementById('console-modal-overlay').addEventListener('click', closeHandler, { once: true });
+    };
+  }
+
+  // Auto-run flags when results are first shown (once per run)
+  if (!state._flagsDoneForRun) {
+    state._flagsDoneForRun = true;
+    setTimeout(() => runAutoFlag(), 800);
+  }
 
   renderResultsTable();
   renderExcludedFooter();
@@ -1406,18 +1458,8 @@ function renderInconclusivesFooter() {
 // ──────────────────────────────────────────────────────────────
 
 async function runAutoFlag() {
-  const btn = document.getElementById('autoflag-btn');
-  const statusEl = document.getElementById('autoflag-status');
   const companies = state.wizardFiltered;
-
-  statusEl.classList.remove('hidden');
-
-  if (companies.length === 0) {
-    statusEl.textContent = 'No qualifying companies to flag.';
-    return;
-  }
-
-  btn.disabled = true;
+  if (companies.length === 0) return;
   let done = 0;
 
   for (const company of companies) {
@@ -1452,8 +1494,7 @@ async function runAutoFlag() {
     renderResultsTable();
   }
 
-  statusEl.textContent = `Done — flagged ${done} of ${companies.length} compan${companies.length === 1 ? 'y' : 'ies'}.`;
-  btn.disabled = false;
+  renderResultsTable();
 }
 
 // ──────────────────────────────────────────────────────────────
