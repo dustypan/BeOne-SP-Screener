@@ -735,7 +735,7 @@ FLAGS — Claude sets these automatically:
     for at least one qualifying asset. Company still screens IN when this flag is set.
 indication-synergy, phase-synergy, checkpoint-io-alt, and masked-tce-4-1bb are auto-computed
 server-side from asset data after screening — do not set these yourself.
-adc-novel-payload still requires manual autoflag (payload detail not in Citeline data).
+adc-novel-payload: Citeline-auto-detected for clear novel MOAs; tubulin edge cases (MMAE vs DM1) still need Claude autoflag.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
@@ -1872,18 +1872,31 @@ function computePhaseSynergy(asset, ctgov) {
 }
 
 // Targets that qualify for checkpoint-IO-alt flag
-const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a'];
+const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a', 'cd112r', 'siglec', 'lair-1', 'lair1', 'ceacam1', 'pvrig', 'lilrb'];
 
-// Compute flags directly from Steps 1+2 asset data (no web research needed).
-// Called automatically after every screening run — no manual autoflag step required
-// for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
-// adc-novel-payload and TCE masking moiety still need manual autoflag (payload detail not in Citeline data).
+// Compute flags directly from Citeline Steps 1+2 asset data (no web research needed).
+// Auto-detected: indication-synergy, phase-synergy, checkpoint-io-alt, masked-tce-4-1bb (4-1BB arm),
+//               adc-novel-payload (when Citeline directMechanism shows a non-Topo-I/non-tubulin payload).
+// Still needs Claude autoflag: masked-tce masking moiety, adc-novel-payload tubulin edge cases.
+
+// Standard ADC payload MOA classes (Citeline directMechanism terms)
+const TOPO1_MOA_TERMS   = ['topoisomerase i inhibitor', 'topoisomerase-i', 'topo i inhibitor', 'top1 inhibitor', 'topoisomerase 1 inhibitor'];
+const TUBULIN_MOA_TERMS = ['tubulin polymerisation inhibitor', 'tubulin polymerization inhibitor', 'auristatin', 'maytansinoid'];
+// Novel payload terms (non-Topo-I, non-MMAE/tubulin) that appear as directMechanism in Citeline
+const NOVEL_PAYLOAD_TERMS = [
+  'dna alkylating', 'dna crosslink', 'pyrrolobenzodiazepine', 'pbd',
+  'calicheamicin', 'enediyne', 'rna splicing', 'spliceosome', 'sting agonist',
+  'amatoxin', 'cryptophycin', 'ksp inhibitor', 'bcl-2 inhibitor', 'bcl inhibitor',
+  'exatecin', 'alpha-amanitin', 'kinesin',
+];
+
 function computeFlagsFromAsset(asset) {
   if (!asset || asset.overallStatus === 'excluded') return [];
   const flags = new Set();
   const targets = (asset.targets || []).map(t => (t || '').toLowerCase());
   const modality = (asset.modality || '').toLowerCase();
   const phase = (asset.phase || '').toLowerCase();
+  const tgtsJoined = targets.join(' ');
 
   // Indication synergy — keyword match on indication field
   if (matchesIndicationSynergy(asset.indication || '')) flags.add('indication-synergy');
@@ -1893,15 +1906,31 @@ function computeFlagsFromAsset(asset) {
   if (leadOptTerms.some(t => phase.includes(t))) flags.add('phase-synergy');
   if (phase.includes('2/3') || phase.includes('ii/iii') || phase.includes('2/iii') || phase.includes('ii/3')) flags.add('phase-synergy');
 
-  // Strategic — checkpoint IO alt: non-PD1/PD-L1 checkpoint target, or bsAb/tsAb hitting PD-1/PD-L1
+  // Checkpoint IO alt:
+  //   (a) any non-PD-1/PD-L1 checkpoint receptor in targets, OR
+  //   (b) PD-1/PD-L1 combined with ANY other target (bispecific or multi-target mechanism)
   const hasPD = targets.some(t => t.includes('pd-1') || t.includes('pd-l1') || t === 'pd1' || t === 'pdl1');
   const hasAltCheckpoint = targets.some(t => CHECKPOINT_ALT_TARGETS.some(c => t.includes(c)));
-  const isBispecificPlus = ['bsab', 'tsab'].includes(modality);
-  if (hasAltCheckpoint || (hasPD && isBispecificPlus)) flags.add('checkpoint-io-alt');
+  const hasNonPDtarget = targets.some(t =>
+    !t.includes('pd-1') && t !== 'pd1' && !t.includes('pd-l1') && t !== 'pdl1' && t.trim().length > 2
+  );
+  if (hasAltCheckpoint || (hasPD && hasNonPDtarget)) flags.add('checkpoint-io-alt');
 
-  // Strategic — 4-1BB arm (TCE or bsAb/tsAb engaging 4-1BB/CD137)
+  // Masked TCE / 4-1BB arm: TCE or bsAb engaging 4-1BB/CD137 (masking moiety needs Claude autoflag)
   const has41BB = targets.some(t => t.includes('4-1bb') || t.includes('cd137'));
   if (has41BB) flags.add('masked-tce-4-1bb');
+
+  // ADC novel payload: auto-detect from Citeline directMechanism (targets field)
+  // Non-Topo-I, non-tubulin payload terms = novel; tubulin is ambiguous (MMAE vs DM1) — left to Claude
+  if (modality === 'adc') {
+    const isTopoI  = TOPO1_MOA_TERMS.some(t => tgtsJoined.includes(t));
+    const isTubulin = TUBULIN_MOA_TERMS.some(t => tgtsJoined.includes(t));
+    const hasNovelMOA = NOVEL_PAYLOAD_TERMS.some(t => tgtsJoined.includes(t));
+    // Auto-flag only on positive novel-payload evidence; tubulin edge cases handled by autoflag Claude
+    if (hasNovelMOA && !isTopoI) flags.add('adc-novel-payload');
+    // Store payload class hint for autoflag Claude to use
+    asset._citelinePayloadHint = isTopoI ? 'topo-i' : isTubulin ? 'tubulin-ambiguous' : hasNovelMOA ? 'novel' : 'unknown';
+  }
 
   return Array.from(flags);
 }
@@ -1940,14 +1969,24 @@ Existing research notes: ${asset.notes || company.researchNotes || '(none)'}
 Company website: ${company.website || '(unknown)'}
 
 Qualifies if ANY of:
-1. masked-tce-4-1bb: a TCE with EITHER a masking/prodrug moiety (TME-cleavable, probody, conditional activation) OR engaging 4-1BB (CD137) as one of its targets.
-2. adc-novel-payload: an ADC using a single payload OTHER than a TOP1 inhibitor (DXd/deruxtecan, SN-38, exatecan) or MMAE — e.g. DM1, DM4, PBD, calicheamicin, tubulysin, cryptophycin — OR a dual payload combination other than MMAE+TOP1.
-3. checkpoint-io-alt: targets a T-cell checkpoint receptor OTHER than PD-1/PD-L1 (LAG-3, TIM-3, TIGIT, CTLA-4, VISTA, BTLA, CD96, NKG2A), OR targets PD-1/PD-L1 IN COMBINATION with another target.
+1. masked-tce-4-1bb: a TCE (T-cell engager) with a masking or prodrug moiety that conditionally
+   activates in the tumour microenvironment — e.g. TME-cleavable mask, probody, EGFR/protease-
+   activated conditional. NOTE: 4-1BB/CD137 arm is already auto-detected from target data;
+   only research this flag if the asset is a TCE and masking is not yet confirmed.
+2. adc-novel-payload: an ADC whose payload is NOT a Topo-I inhibitor (DXd/deruxtecan, SN-38,
+   exatecan) and NOT MMAE. Novel payloads include: DM1, DM4 (maytansinoids), PBD
+   (pyrrolobenzodiazepine), calicheamicin, tubulysin, cryptophycin, STING agonist, RNA
+   splicing inhibitor, amatoxin, or any dual-payload combination.
+   IMPORTANT: if Citeline shows 'tubulin' payload class, research whether it is MMAE (standard,
+   do NOT flag) or DM1/DM4/other maytansinoid (novel, DO flag).
+3. checkpoint-io-alt: (a) targets any checkpoint receptor OTHER than PD-1/PD-L1 — e.g. LAG-3,
+   TIM-3, TIGIT, CTLA-4, VISTA, BTLA, NKG2A, PVRIG — OR (b) targets PD-1/PD-L1 in combination
+   with ANY other receptor (regardless of modality). Note: this is largely auto-detected from
+   target data; only research if the exact checkpoint target is unclear.
 
-BUDGET: at most 3 tool calls total. Look at the asset's own science/pipeline page or the
-existing notes above first — only search if the specific molecular detail (payload identity,
-masking moiety, exact checkpoint target) genuinely isn't there yet. If you still can't find
-clear evidence after 3 calls, do NOT guess — return "none".
+BUDGET: at most 3 tool calls total. Check existing research notes first — only search if the
+specific molecular detail (payload class, masking moiety, exact checkpoint target) is genuinely
+missing. If still unclear after 3 calls, return "none" — do NOT guess.
 
 Return ONLY this JSON, nothing else:
 {"flag": "masked-tce-4-1bb" | "adc-novel-payload" | "checkpoint-io-alt" | "none", "reason": ""}`
