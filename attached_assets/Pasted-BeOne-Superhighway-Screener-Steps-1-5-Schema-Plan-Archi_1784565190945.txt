@@ -1,0 +1,250 @@
+BeOne Superhighway Screener — Steps 1–5 Schema & Plan
+Architecture Overview
+Two tracks feed into the same 5-step funnel. Every company enters the Citeline Primary Track first. If Citeline has no record, it falls through to the Secondary (Web Research) Track.
+
+
+Company Input
+     │
+     ▼
+[Pre-filter: Big Pharma exclusion] ── static list → excluded
+     │
+     ▼
+[Citeline Spreadsheet Lookup] ── not found → Secondary Track
+     │
+     ▼
+Steps 1+2 (done simultaneously from spreadsheet data)
+     │
+     ▼
+Step 3 — Competitive Overlap (client-side, no API)
+     │
+     ▼
+Steps 4+5 — OneBD Cortellis Deals (one company-level API call)
+     │
+     ▼
+JSON Result
+Data Sources
+Source	Used For	How Accessed
+Citeline_Screener_Data.xlsx	Steps 1+2 — asset identification, modality, phase, targets, indications	Loaded into memory at server startup; indexed by company name stem
+OneBD Cortellis API	Steps 4+5 — licensing deals, manufacturing deals	onebd_resolve_company → onebd_get_deals
+BEONE_PIPELINE constant	Step 3 — competitive overlap check	Hardcoded in screener.js, runs client-side
+Citeline Spreadsheet Schema (per row)
+Each row in the spreadsheet is one company–drug pairing. The same drug can appear multiple times under different companies (originator, licensee, partner).
+
+
+companyName         — company name as in Citeline
+companyRelationship — Originator | Licensee | Co-developer | ...
+drugId              — stable Citeline integer ID (primary key for asset matching)
+drugPrimaryName     — INN / primary drug name
+altNames            — semicolon-delimited synonyms (brand names, research codes, INNs)
+drugTypeCaption     — modality (e.g. "Bispecific antibody", "Antibody-drug conjugate")
+drugTypeHierarchy   — parent category (e.g. "Biologic > Antibody > Bispecific antibody")
+globalStatus        — Active | Discontinued | Withdrawn | Suspended
+citelinePhase       — Launched | Phase III | Phase II | Phase I | Preclinical | ...
+allDiseases         — all indications (semicolon-delimited disease names)
+allStatuses         — all development statuses across company entries
+allMechanisms       — MOA / directMechanism (targets by mechanism of action)
+allTargets          — target families (e.g. "PD-1; HER2")
+allPayloads         — ADC payloads if applicable
+altNames            — drug name synonyms for asset matching
+allLicensees        — companies that have licensed this drug
+allLicensers        — companies that licensed this drug from someone
+allTerritories      — territories covered by deals
+allDealTypes        — deal type categories
+allManufacturers    — manufacturing/CDMO partners
+licensingAvailability — drug_panel.licensing flag (Available / Not Available / null)
+companyWebsite      — company website URL from Citeline
+Index key: company names are normalized to a core stem before indexing — strips suffixes (Bio, Therapeutics, Biosciences, Inc, Ltd, etc.) and CamelCase-splits. "HanchorBio" = "Hanchor Therapeutics" = "hanchor".
+
+Qualifying Modalities (Steps 1+2 filter)
+Only these Citeline drugTypeCaption values pass:
+
+
+Human monoclonal antibody        Humanized monoclonal antibody
+Chimaeric monoclonal antibody    Murine monoclonal antibody
+Monoclonal antibody, other       Bispecific antibody
+Trispecific antibody             Antibody-drug conjugate
+Cell engager, bispecific         Trispecific cell engager
+Cell engager, other              Fusion protein
+Multispecific antibody
+All are CHO/mammalian cell-expressed biologics. Excludes: small molecules, peptides, cell therapies (CAR-T), mRNA/LNP, VHH/nanobodies (yeast/E.coli expressed).
+
+Anticancer filter: drug must have at least one indication where indicationGroups = 'Anticancer'.
+
+Excluded statuses: Discontinued, Withdrawn, Suspended, Ceased — filtered before any asset reaches Step 3.
+
+Regimen filter: any drugPrimaryName containing "+" is a combination regimen — excluded (Citeline convention).
+
+Step 1+2 — Oncology Biologic Identification (Citeline)
+Runs simultaneously from the spreadsheet lookup. No API call.
+
+Input: company name (stemmed)
+Process:
+
+Stem the company name → look up in pre-built index
+Collect all rows matching that company stem
+Filter to qualifying modalities + anticancer indication + active status
+Deduplicate by drugId using MODALITY_PRIORITY (picks best modality per drug if multiple rows)
+Flag thin-coverage if: ≤2 assets, OR any asset has no targets, OR all assets are "No Development Reported"
+Output per asset:
+
+
+{
+  drugId, drug, altNames,
+  citelineModality, citelinePhase, status,
+  targets, indications,
+  companyWebsite
+}
+Outcomes:
+
+≥1 qualifying asset → proceed to Step 3
+0 qualifying assets → excluded (no oncology biologics)
+Company not in Citeline → fall through to secondary track
+Step 3 — Competitive Overlap (Client-Side)
+Runs before any API call. Pure data comparison — no network request.
+
+Logic: compare each asset's modality + targets against BEONE_PIPELINE reference table.
+
+Match rules:
+
+HER2: any BeOne pipeline entry containing HER2 matches if HER2 appears anywhere in the candidate's target set
+All other targets: exact multiset match required — modality AND full target combination must match exactly
+Partial overlap (sharing one target out of several) does NOT trigger exclusion
+Result per asset: layer3: { status: "pass" | "fail", reason: "" }
+
+Assets failing Step 3 are shown in the UI with a "competitor" tag. They do NOT proceed to Steps 4+5.
+
+Steps 4+5 — Cortellis Deals (OneBD API)
+Runs once per company using a single company-level deal pull. Both steps assessed simultaneously from the same deal batch.
+
+Call sequence:
+
+
+1. onebd_resolve_company(companyName) → { found, company_id, name }
+   └─ Not found: all assets pass Steps 4+5, output deals:[], done.
+
+2. onebd_get_deals(company_id) → all deals
+   └─ Returns: title, date, summary, assets[], territories[], 
+               agreement_type, transaction_type, parties[], values[]
+Deal collection → deals[] array:
+Every cancer biologic deal gets recorded in deals[] regardless of outcome:
+
+
+{
+  title, date, partner,
+  type:         "licensing|manufacturing|collaboration|option|acquisition|other",
+  territory:    "Global|US|Ex-US|China|unspecified|...",
+  scope:        "specific-asset|modality-group|all|company-level",
+  modalityGroup: "bsAb|TCE|ADC|mAb|Fc-fusion|tsAb",  // if scope=modality-group
+  assetNames:   [],   // if scope=specific-asset
+  relevance:    "rights|manufacturing|collaboration|equity|other",
+  summary:      "one-line summary"
+}
+Asset matching — only for deals scoped to a specific asset or modality group:
+
+Modality-group deals (scope = modality-group or assets[] is empty):
+
+Use keyword mapping from deal title/summary to determine which modality is covered
+Apply to ALL qualifying assets of that modality — no tool call needed
+Example: "EpiMab licenses its bispecific antibody program" → layer4: fail on ALL bsAb assets
+Specific-asset deals (scope = specific-asset, assets[] has named compounds):
+
+Match deal asset name against each pipeline asset's drug name + every altNames entry (case-insensitive)
+If any altName matches → confirmed, apply deal to that asset
+Only if altName matching is ambiguous → call onebd_resolve_asset twice (deal name + pipeline name) to confirm by OneBD ID
+Modality keyword mapping:
+
+
+"bispecific program / bsAb program"      → all bsAb assets
+"trispecific / multispecific program"    → all tsAb + bsAb assets  
+"ADC program / ADC portfolio"            → all ADC assets
+"TCE program / T-cell engager program"   → all TCE assets
+"mAb portfolio / antibody program"       → all mAb assets
+"fusion program / Fc-fusion"             → Fc-fusion + fusion-scaffold bsAb/tsAb
+"entire pipeline / all programs"         → every asset
+Step 4 — Rights / Licensing Check
+Keywords triggering assessment: out-licens, exclusive license, grant license, license rights, sublicens, royalt, assign rights, transfer rights, commercialization rights
+
+Also check structured fields: agreement_type, transaction_type — more reliable than keyword matching.
+
+Deal condition	Result
+transaction_type contains "Option" or "License Option"	layer4: fail — asset encumbered regardless of territory
+Explicit rights-transfer, territory = Global or US	layer4: fail
+Explicit rights-transfer, territory = ex-US only (China, APAC, Europe)	layer4: pass
+Explicit rights-transfer, territory unspecified	layer4: fail (assumed global)
+Collaboration / co-development, no rights-transfer language	layer4: pass
+No matching deal	layer4: pass
+DO NOT trigger on: collaboration, partnership, co-develop, co-promotion.
+
+Step 5 — US Manufacturing Check
+Keywords: manufactur, cdmo, cmo, contract manufactur, supply agreement, tech transfer, bioreactor, lonza, wuxi biolog, samsung biolog, thermo fisher, catalent, fujifilm, agc biolog, rentschler, patheon
+
+When territories[] is empty, infer US presence from the manufacturing party's entity name:
+
+Entity name pattern	Inference	Result
+"(Shanghai)", "(Suzhou)", "(Beijing)", "Co Ltd" Chinese suffix, "(Korea)", "(Germany)" alone, "(Japan)", "(India)"	Specific non-US location	layer5: pass
+No geographic qualifier, "Inc" (US suffix), "(USA)", "(US)", "North America", OR known global CDMOs: Lonza, WuXi Biologics (any entity), Fujifilm Diosynth, AGC Biologics, Thermo Fisher, Catalent, Patheon, Samsung Biologics, Boehringer Ingelheim Biopharmaceuticals	Global/US capacity	layer5: fail
+Truly ambiguous		layer5: pass + check-mfg-partner flag
+Program-level manufacturing: if a deal covers a modality group (e.g. "all bsAbs manufactured by Lonza") → layer5: fail on ALL bsAb assets.
+
+Deal condition	Result
+Manufacturing deal, territory explicitly Global or US	layer5: fail
+Manufacturing deal, territory explicitly non-US	layer5: pass
+Manufacturing deal, territory unspecified, CDMO = specific non-US entity	layer5: pass
+Manufacturing deal, territory unspecified, CDMO = global/US-capable	layer5: fail
+No manufacturing deal found	layer5: pass (manufacturing gap = qualifying)
+Output JSON Schema
+
+{
+  name:             "company name",
+  id:               "slugified-id",
+  type:             "public | private | unknown",
+  website:          "url or null",
+  status:           "qualifying | excluded | inconclusive",
+  sourceTrack:      "citeline | secondary",
+  excludedAt:       null | "pre-filter" | "Steps 1+2" | "layer1" | ... | "layer5",
+  excludedReason:   "",
+  inconclusiveReason: "",
+
+  assets: [
+    {
+      name:         "asset name",
+      modality:     "mAb|bsAb|tsAb|ADC|TCE|NKCE|Fc-fusion",
+      targets:      ["TARGET1", "TARGET2"],
+      indication:   "cancer type",
+      phase:        "Preclinical|Phase 1|Phase 2|Phase 3|Approved|...",
+      isPlatform:   false,
+      overallStatus: "qualifying | excluded",
+      layer1: { status: "pass|fail|inconclusive", reason: "", source: "" },
+      layer2: { status: "pass|fail|inconclusive", reason: "", source: "" },
+      layer3: { status: "pass|fail|inconclusive", reason: "" },
+      layer4: { status: "pass|fail|inconclusive", reason: "", source: "" },
+      layer5: { status: "pass|fail|inconclusive", reason: "", source: "" },
+      notes:  "deal notes — one line per matched deal",
+      flags:  [],
+      sources: []
+    }
+  ],
+
+  deals: [
+    {
+      title, date, partner, type, territory,
+      scope, modalityGroup, assetNames,
+      relevance, summary
+    }
+  ],
+
+  flags:            [],   // company-level: thin-coverage, check-mfg-partner, purple-flag, etc.
+  beoneAnalyzed:    false,
+  beoneOutcome:     null,
+  researchNotes:    "",
+  sources:          [],
+  externalSourcing: false
+}
+Layer Key Reference
+Layer	Step	Checks
+layer1	Step 1	Oncology indication confirmed
+layer2	Step 2	Qualifying modality (CHO biologic)
+layer3	Step 3	Not a direct BeOne pipeline competitor
+layer4	Step 4	US/global rights NOT out-licensed
+layer5	Step 5	No confirmed US manufacturing/CDMO partner
+A company qualifies when it has ≥1 asset where all five layers pass. Assets excluded at any layer are shown in the UI with that layer's color-coded shading. Step 4 excluded assets (out-licensed programs) are always shown inline on the company card with red shading, regardless of the "show screened out" toggle.
