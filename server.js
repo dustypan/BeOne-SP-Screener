@@ -310,6 +310,10 @@ const CITELINE_TOOLS = [
   },
 ];
 
+// Website-track-with-Cortellis tool set — used when all Citeline assets are inactive.
+// Combines full web research tools with OneBD deal lookup for Steps 4+5.
+const CITELINE_WEBSITE_TOOLS = [...TOOLS, ...CITELINE_TOOLS];
+
 // ─────────────────────────────────────────────────────────────
 // Repository recall helpers
 // ─────────────────────────────────────────────────────────────
@@ -1620,6 +1624,12 @@ function loadCitelineSpreadsheet() {
 }
 
 const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
+// Citeline status values that indicate no active development. Assets with these
+// statuses are filtered out before screening. If ALL of a company's Citeline assets
+// are inactive, the screener auto-routes to the Citeline website track.
+const INACTIVE_CITELINE_STATUSES = new Set([
+  'No Development Reported', 'Ceased', 'Discontinued', 'Withdrawn', 'Suspended'
+]);
 
 function citelineGetAssetsLocal(companyName) {
   const needle = stemCompany(companyName);
@@ -2065,29 +2075,48 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
   if (coverageStatus !== 'qualifying') {
     if (coverageStatus === 'inconclusive-not-found') {
       console.log(`    [${companyName}] [citeline] company not found in Citeline — falling through`);
-      return null;
+      return { result: null, citelineWebsite: null };
     }
     const modSample = (nonQualifyingModalities || []).slice(0, 3).join(', ');
     const excludedReason = coverageStatus === 'excluded-small-molecule'
       ? `No oncology biologics in Citeline — small molecule pipeline (${modSample})`
       : `Biologic pipeline present but no anticancer indication in Citeline (${modSample})`;
     console.log(`    [${companyName}] [citeline] ${excludedReason}`);
-    return {
+    return { result: {
       name: companyName, id: slugify(companyName), type: 'unknown',
       website: companyWebsite, status: 'excluded', sourceTrack: 'citeline',
       excludedAt: 'Steps 1+2', excludedReason,
       inconclusiveReason: '', assets: [], beoneAnalyzed: false, beoneOutcome: null,
       flags: [], researchNotes: '', allSourcesConsulted: [], evidenceSnapshots: [],
       sources: [{ url: 'citeline:sql', label: 'Citeline database (Steps 1+2)', usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline' }],
-    };
+    }, citelineWebsite };
   }
 
-  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
-  const thinCoverage = rows.length <= 2
-    || rows.some(r => !r.targets || r.targets.trim() === '')
-    || rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
+  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets found`);
 
-  const assetLines = rows.map((r, i) => {
+  // Filter out inactive assets — only pass active pipeline to Claude
+  const activeRows = rows.filter(r =>
+    !INACTIVE_CITELINE_STATUSES.has(r.status) &&
+    !INACTIVE_CITELINE_STATUSES.has(r.citelinePhase)
+  );
+
+  // If ALL assets are inactive (Ceased/NDR), auto-route to website track using Citeline URL
+  if (rows.length > 0 && activeRows.length === 0) {
+    console.log(`    [${companyName}] [citeline] all ${rows.length} asset(s) inactive (Ceased/NDR) — routing to website track`);
+    emit('🌐 Citeline: all assets inactive — routing to website track');
+    return { result: null, citelineWebsite: companyWebsite, allInactive: true };
+  }
+
+  const inactiveFiltered = rows.length - activeRows.length;
+  if (inactiveFiltered > 0) {
+    console.log(`    [${companyName}] [citeline] ${activeRows.length} active asset(s) (${inactiveFiltered} inactive filtered out)`);
+  }
+
+  const thinCoverage = activeRows.length <= 2
+    || activeRows.some(r => !r.targets || r.targets.trim() === '')
+    || activeRows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
+
+  const assetLines = activeRows.map((r, i) => {
     const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
     const phase    = CITELINE_PHASE_MAP[r.citelinePhase] || r.citelinePhase || 'Unknown';
     let line =
@@ -2107,7 +2136,7 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
     role: 'user',
     content:
       `Screen this company through the Citeline primary track: "${companyName}"\n\n` +
-      `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
+      `CITELINE DATABASE — Steps 1+2 complete (${activeRows.length} active qualifying oncology biologic assets):\n\n` +
       `${assetLines}\n\n` +
       `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
       steps345Instruction,
@@ -2180,7 +2209,7 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
         });
       }
 
-      return result;
+      return { result, citelineWebsite: companyWebsite };
     }
 
     if (response.stop_reason === 'pause_turn') {
@@ -2228,14 +2257,14 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
   }
 
   console.log(`    [${companyName}] [citeline] exhausted iteration budget — returning inconclusive`);
-  return {
+  return { result: {
     name: companyName, id: slugify(companyName), type: 'unknown', website: companyWebsite,
     status: 'inconclusive', sourceTrack: 'citeline', excludedAt: null, excludedReason: '',
     inconclusiveReason: 'Citeline primary track hit iteration limit',
     assets: [], beoneAnalyzed: false, beoneOutcome: null, flags: [],
     externalSourcing: false, externalSources: [], researchNotes: '',
     allSourcesConsulted: [...new Set(fetchedUrls)], evidenceSnapshots,
-  };
+  }, citelineWebsite: companyWebsite };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2289,12 +2318,17 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   }
 
   // ── PRIMARY TRACK: Citeline SQL (Steps 1+2) ───────────────────────────────────
+  let citelineWebsite = null;
+  let allInactive = false;
   if (!skipCiteline && DefaultAzureCredential) {
     console.log(`    [${companyName}] [primary-track] Citeline SQL`);
     emit('📊 Checking Citeline database…');
     let citelineResult = null;
     try {
-      citelineResult = await screenWithCitelinePrimary(companyName, client, emit);
+      const citelineResponse = await screenWithCitelinePrimary(companyName, client, emit);
+      citelineResult  = citelineResponse?.result          ?? null;
+      citelineWebsite = citelineResponse?.citelineWebsite ?? null;
+      allInactive     = citelineResponse?.allInactive     ?? false;
     } catch (e) {
       console.log(`    [${companyName}] [citeline] [error] ${e.message} — falling through to secondary track`);
     }
@@ -2305,8 +2339,15 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       emit(`✅ Citeline done: ${citelineResult.status}${citelineResult.excludedAt ? ' (excl @ '+citelineResult.excludedAt+')' : ''}`);
       return citelineResult;
     }
-    console.log(`    [${companyName}] [citeline→secondary] No qualifying assets in Citeline — routing to secondary track`);
-    emit('🌐 Citeline: not found — switching to web research');
+    // Use Citeline's URL as fallback if no explicit websiteUrl was supplied
+    if (!websiteUrl && citelineWebsite) websiteUrl = citelineWebsite;
+    if (allInactive) {
+      console.log(`    [${companyName}] [citeline→website-track] All assets inactive — website track with Cortellis${websiteUrl ? ' (URL: ' + websiteUrl + ')' : ''}`);
+      emit('🌐 All Citeline assets inactive — running website track with Cortellis');
+    } else {
+      console.log(`    [${companyName}] [citeline→secondary] No qualifying assets in Citeline — routing to secondary track`);
+      emit('🌐 Citeline: not found — switching to web research');
+    }
   }
   // ──────────────────────────────────────────────────────────────────────────────
 
@@ -2317,7 +2358,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   const messages = [
     {
       role: 'user',
-      content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"${websiteUrl ? `\n\nURL PROVIDED: The company's website is already known: ${websiteUrl}\nIn Step 0a, fetch this URL directly instead of running a web_search — skip the search entirely and go straight to fetch_webpage("${websiteUrl}").` : ''}${skipCiteline ? `\n\nCONTEXT — WEBSITE TRACK: This company was found in Citeline with thin coverage (≤2 qualifying assets or missing target data). Use the WEBSITE track methodology to get richer asset data and complete layers 3–5. The website URL is pre-supplied above — start there. You may still find additional qualifying assets beyond what Citeline reported; include all of them in assets[].` : ''}
+      content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"${websiteUrl ? `\n\nURL PROVIDED: The company's website is already known: ${websiteUrl}\nIn Step 0a, fetch this URL directly instead of running a web_search — skip the search entirely and go straight to fetch_webpage("${websiteUrl}").` : ''}${allInactive ? `\n\nCONTEXT — CITELINE WEBSITE TRACK (all assets inactive): Citeline found this company but ALL pipeline assets are Ceased or No Development Reported. Use the company website URL pre-supplied above — go directly to their pipeline/science page to find their CURRENT active assets. ONLY include assets that are actively in development (not ceased, discontinued, or withdrawn). After completing Layers 1–3 from the website, MANDATORY: call onebd_resolve_company("${companyName}") then onebd_get_deals(company_id) for Steps 4 and 5 — do not use web research for rights/manufacturing when Cortellis deal data is available.` : skipCiteline ? `\n\nCONTEXT — WEBSITE TRACK: This company was found in Citeline with thin coverage (≤2 qualifying assets or missing target data). Use the WEBSITE track methodology to get richer asset data and complete layers 3–5. The website URL is pre-supplied above — start there. You may still find additional qualifying assets beyond what Citeline reported; include all of them in assets[].` : ''}
 
 BUDGET: you have at most 6 tool calls total for this company (the external-sourcing fallback
 in step 0a below has its own separate, additional sub-cap — see that step). Track your count.
@@ -2485,6 +2526,9 @@ Return the JSON screening result now.`
   // these pages without running any new web searches.
   const fetchedUrls = [];
   const evidenceSnapshots = [];
+  // Used by the all-inactive website-track path to track Cortellis state
+  let oneBdCompanyId   = null;
+  let oneBdDealsFetched = false;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
@@ -2492,7 +2536,7 @@ Return the JSON screening result now.`
       max_tokens: 8000,
       temperature: 0,
       system: SYSTEM_PROMPT,
-      tools: TOOLS,
+      tools: allInactive ? CITELINE_WEBSITE_TOOLS : TOOLS,
       messages,
     });
 
@@ -2517,6 +2561,25 @@ Return the JSON screening result now.`
     }
 
     if (response.stop_reason === 'end_turn') {
+      // All-inactive website track: ensure Cortellis was consulted before finalizing
+      if (allInactive && oneBdCompanyId && !oneBdDealsFetched) {
+        console.log(`    [${companyName}] [website-track] [guard] onebd_get_deals skipped — fetching now`);
+        let dealsOutput;
+        try {
+          dealsOutput = await oneBdGetDealsForTool(oneBdCompanyId);
+          oneBdDealsFetched = true;
+        } catch (e) {
+          dealsOutput = JSON.stringify({ deals: [], error: e.message });
+        }
+        messages.push({
+          role: 'user',
+          content:
+            `MANDATORY CORRECTION: You must call onebd_get_deals before producing output.\n` +
+            `Here are all Cortellis deals for this company (company_id=${oneBdCompanyId}):\n\n${dealsOutput}\n\n` +
+            `Apply Steps 4+5 using these deals, then return the complete revised JSON.`,
+        });
+        continue;
+      }
       const textBlock = response.content.find(b => b.type === 'text');
       const jsonMatch = textBlock && textBlock.text.match(/\{[\s\S]*\}/);
 
@@ -2606,6 +2669,14 @@ Return the JSON screening result now.`
                 ? `Filing found: ${tickerFilingUrl}`
                 : `CIK ${tickerCik} found for ticker "${ticker}" but no 10-K/20-F on file.`;
             }
+          } else if (toolUse.name === 'onebd_resolve_company') {
+            output = await oneBdResolveCompanyForTool(toolUse.input.companyName);
+            try { const _p = JSON.parse(output); if (_p.found && _p.id) oneBdCompanyId = _p.id; } catch (_) {}
+          } else if (toolUse.name === 'onebd_get_deals') {
+            output = await oneBdGetDealsForTool(toolUse.input.companyId);
+            oneBdDealsFetched = true;
+          } else if (toolUse.name === 'onebd_resolve_asset') {
+            output = await oneBdResolveAssetForTool(toolUse.input.assetName);
           } else {
             output = 'Unknown tool.';
           }
