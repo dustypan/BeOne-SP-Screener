@@ -36,44 +36,6 @@ const state = {
 // Persistence (localStorage)
 // ──────────────────────────────────────────────────────────────
 
-// ── API Key ────────────────────────────────────────────────────
-
-function getApiKey() {
-  return localStorage.getItem('beone-api-key') || '';
-}
-
-function initApiKey() {
-  const input    = document.getElementById('api-key-input');
-  const saveBtn  = document.getElementById('api-key-save-btn');
-  const statusEl = document.getElementById('api-key-status');
-  if (!input) return;
-
-  const saved = getApiKey();
-  if (saved) {
-    input.value = saved;
-    statusEl.textContent = 'Key saved ✓';
-    statusEl.className = 'api-key-status saved';
-  }
-
-  saveBtn.addEventListener('click', () => {
-    const key = input.value.trim();
-    if (!key) {
-      localStorage.removeItem('beone-api-key');
-      statusEl.textContent = 'Key cleared';
-      statusEl.className = 'api-key-status missing';
-      return;
-    }
-    if (!key.startsWith('sk-ant-')) {
-      statusEl.textContent = 'Does not look like an Anthropic key (should start with sk-ant-)';
-      statusEl.className = 'api-key-status missing';
-      return;
-    }
-    localStorage.setItem('beone-api-key', key);
-    statusEl.textContent = 'Key saved ✓';
-    statusEl.className = 'api-key-status saved';
-  });
-}
-
 // ───────────────────────────────────────────────────────────────
 
 function loadPersisted() {
@@ -310,7 +272,7 @@ async function runScreener(names) {
       try {
         const startResp = await fetch('/api/screen', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ company: name, runId: state.currentRunId }),
         });
 
@@ -604,7 +566,7 @@ async function continueCompanyScreening(companyId) {
   try {
     const resp = await fetch('/api/screen/resume', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company: company.name,
         runId: state.currentRunId,
@@ -656,7 +618,7 @@ async function runRescreening() {
     try {
       const startResp = await fetch('/api/screen', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           company: company.name,
           runId: state.currentRunId,
@@ -1463,7 +1425,7 @@ async function runAutoFlag() {
     try {
       const resp = await fetch('/api/autoflag', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company }),
       });
 
@@ -1689,7 +1651,7 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
   try {
     const startResp = await fetch('/api/screen/website-track', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companyName: company.name, websiteUrl: websiteUrl || company.website || '' }),
     });
     if (!startResp.ok) {
@@ -2098,7 +2060,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   loadPersisted();
-  initApiKey();
   initUpload();
   initColumnPicker();
   initSummary();

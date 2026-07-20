@@ -2812,9 +2812,8 @@ app.post('/api/screen', (req, res) => {
   const { company, runId, websiteUrl, skipPharmcube } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company name' });
 
-  const apiKey = req.headers['x-api-key'] ||
-    process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured. Enter your key in the screener settings.' });
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key;
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY secret is not configured on the server.' });
 
   const jobId = createJob();
   res.json({ jobId }); // ← returns immediately; screening runs in background below
@@ -2879,9 +2878,8 @@ app.post('/api/screen/website-track', (req, res) => {
   if (!companyName) return res.status(400).json({ error: 'Missing companyName' });
   if (!websiteUrl)  return res.status(400).json({ error: 'Missing websiteUrl — thin-coverage company must have a Citeline website URL' });
 
-  const apiKey = req.headers['x-api-key'] ||
-    process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured.' });
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key;
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY secret is not configured on the server.' });
 
   const jobId = createJob();
   res.json({ jobId });
@@ -2913,9 +2911,8 @@ app.post('/api/autoflag', async (req, res) => {
   const { company } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company' });
 
-  const apiKey = req.headers['x-api-key'] ||
-    process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured. Enter your key in the screener settings.' });
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.anthropic_api_key;
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY secret is not configured on the server.' });
 
   console.log(`\n[autoflag] ${company.name}`);
 
