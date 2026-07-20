@@ -1,0 +1,6 @@
+.env
+node_modules/
+*.bak
+*.zip
+.cache/
+test-native-search.js

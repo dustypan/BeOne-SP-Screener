@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeOne Superhighway Screener — Sign In</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-body">
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo"><img src="/images/beone-logo-nobg.png" alt="BeOne"></div>
+    <h1 class="login-title">BeOne Superhighway Manufacturing Partnership Screener – Hopewell, NJ</h1>
+
+    <form id="login-form" autocomplete="off">
+      <label class="login-label" for="passkey-input">Passkey</label>
+      <input
+        id="passkey-input"
+        type="password"
+        class="login-input"
+        placeholder="Enter passkey"
+        autocomplete="current-password"
+        required
+      />
+      <p id="login-error" class="login-error" hidden>Incorrect passkey — please try again.</p>
+      <button type="submit" class="login-btn">Continue →</button>
+    </form>
+  </div>
+</div>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button');
+  const err = document.getElementById('login-error');
+  const passkey = document.getElementById('passkey-input').value;
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  err.hidden = true;
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkey }),
+    });
+    if (resp.ok) {
+      window.location.href = '/';
+    } else {
+      err.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Continue →';
+      document.getElementById('passkey-input').value = '';
+      document.getElementById('passkey-input').focus();
+    }
+  } catch (_) {
+    err.textContent = 'Network error — please refresh and try again.';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Continue →';
+  }
+});
+</script>
+</body>
+</html>
