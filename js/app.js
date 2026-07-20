@@ -272,6 +272,12 @@ async function runScreener(names) {
     return new Promise((resolve, reject) => {
       const es = new EventSource(`/api/screen/${jobId}/events`);
       let settled = false;
+      es.addEventListener('progress', e => {
+        try {
+          const { line } = JSON.parse(e.data);
+          appendToRunLog('  ↳ ' + line);
+        } catch {}
+      });
       es.addEventListener('result', e => {
         if (settled) return; settled = true;
         es.close();

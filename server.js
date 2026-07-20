@@ -2019,7 +2019,7 @@ Return ONLY this JSON, nothing else:
 // Returns a full result object, or null if no qualifying assets found (fall through).
 // ─────────────────────────────────────────────────────────────
 
-async function screenWithCitelinePrimary(companyName, client) {
+async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
   console.log(`    [${companyName}] [citeline] querying Citeline SQL...`);
   const { rows, coverageStatus, companyWebsite, nonQualifyingModalities } = await citelineGetAssets(companyName);
 
@@ -2155,6 +2155,8 @@ async function screenWithCitelinePrimary(companyName, client) {
 
       for (const toolUse of toolUses) {
         console.log(`    [${companyName}] [citeline] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 100)}`);
+        const _ci = toolUse.input.url || toolUse.input.companyId || toolUse.input.companyName || JSON.stringify(toolUse.input).slice(0,60);
+        emit(`🔧 ${toolUse.name}: ${_ci}`);
         let output;
         try {
           if (toolUse.name === 'onebd_resolve_company') {
@@ -2222,13 +2224,14 @@ function matchesBigPharma(companyName) {
 // ─────────────────────────────────────────────────────────────
 
 async function screenWithClaude(companyName, client, websiteUrl = null, opts = {}) {
-  const { skipCiteline = false } = opts;
+  const { skipCiteline = false, emit = () => {} } = opts;
 
   // Step 0 first — instant, no research needed, per the plan. Skips the Claude
   // call entirely for an obvious Big Pharma match.
   const bigPharmaMatch = matchesBigPharma(companyName);
   if (bigPharmaMatch) {
     console.log(`    [${companyName}] [pre-filter] EXCLUDED — matches Big Pharma list: ${bigPharmaMatch}`);
+    emit(`⛔ Pre-filter: Big Pharma (${bigPharmaMatch})`);
     return {
       name: companyName,
       id: slugify(companyName),
@@ -2249,9 +2252,10 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   // ── PRIMARY TRACK: Citeline SQL (Steps 1+2) ───────────────────────────────────
   if (!skipCiteline && DefaultAzureCredential) {
     console.log(`    [${companyName}] [primary-track] Citeline SQL`);
+    emit('📊 Checking Citeline database…');
     let citelineResult = null;
     try {
-      citelineResult = await screenWithCitelinePrimary(companyName, client);
+      citelineResult = await screenWithCitelinePrimary(companyName, client, emit);
     } catch (e) {
       console.log(`    [${companyName}] [citeline] [error] ${e.message} — falling through to secondary track`);
     }
@@ -2259,14 +2263,17 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       applyAutoFlags(citelineResult);
       logScreeningBreakdown(citelineResult);
       console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' — excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' — ' + citelineResult.inconclusiveReason : ''}`);
+      emit(`✅ Citeline done: ${citelineResult.status}${citelineResult.excludedAt ? ' (excl @ '+citelineResult.excludedAt+')' : ''}`);
       return citelineResult;
     }
     console.log(`    [${companyName}] [citeline→secondary] No qualifying assets in Citeline — routing to secondary track`);
+    emit('🌐 Citeline: not found — switching to web research');
   }
   // ──────────────────────────────────────────────────────────────────────────────
 
   // ── SECONDARY TRACK: web research methodology ────────────────────────────────
   console.log(`    [${companyName}] [secondary-track] Web research methodology`);
+  emit('🌐 Web research started');
 
   const messages = [
     {
@@ -2530,6 +2537,7 @@ Return the JSON screening result now.`
     // budget silently ran out — log every occurrence now.
     if (response.stop_reason === 'pause_turn') {
       console.log(`    [${companyName}] [pause_turn] internal search loop continuing (iteration ${i + 1}/${MAX_ITERATIONS})`);
+      emit(`⏳ Searching… (step ${i + 1}/${MAX_ITERATIONS})`);
       continue;
     }
 
@@ -2539,6 +2547,8 @@ Return the JSON screening result now.`
 
       for (const toolUse of toolUses) {
         console.log(`    [${companyName}] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 80)}`);
+        const _si = toolUse.input.url || toolUse.input.query || toolUse.input.ticker || JSON.stringify(toolUse.input).slice(0,60);
+        emit(`🔧 ${toolUse.name}: ${_si}`);
         let output;
         try {
           if (toolUse.name === 'fetch_webpage') {
@@ -2771,7 +2781,7 @@ const screeningJobs = new Map(); // jobId → { status, result, error, listeners
 
 function createJob() {
   const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  screeningJobs.set(jobId, { status: 'running', result: null, error: null, listeners: new Set() });
+  screeningJobs.set(jobId, { status: 'running', result: null, error: null, listeners: new Set(), progressListeners: new Set() });
   setTimeout(() => screeningJobs.delete(jobId), 15 * 60 * 1000); // GC after 15 min
   return jobId;
 }
@@ -2783,6 +2793,13 @@ function settleJob(jobId, result) {
   job.result = result;
   job.listeners.forEach(fn => fn(result));
   job.listeners.clear();
+}
+
+function emitProgress(jobId, line) {
+  const job = screeningJobs.get(jobId);
+  if (!job) return;
+  const data = JSON.stringify({ line });
+  job.progressListeners.forEach(fn => { try { fn(data); } catch {} });
 }
 
 // SSE stream — client connects here to receive the result without holding a long HTTP request open.
@@ -2810,8 +2827,10 @@ app.get('/api/screen/:jobId/events', (req, res) => {
     res.end();
   };
 
+  const onProgress = (data) => { try { res.write(`event: progress\ndata: ${data}\n\n`); } catch {} };
+  job.progressListeners.add(onProgress);
   job.listeners.add(deliver);
-  req.on('close', () => { clearInterval(heartbeat); job.listeners.delete(deliver); });
+  req.on('close', () => { clearInterval(heartbeat); job.listeners.delete(deliver); job.progressListeners.delete(onProgress); });
 });
 
 app.post('/api/screen', (req, res) => {
@@ -2823,6 +2842,8 @@ app.post('/api/screen', (req, res) => {
 
   const jobId = createJob();
   res.json({ jobId }); // ← returns immediately; screening runs in background below
+
+  const emit = line => emitProgress(jobId, line);
 
   (async () => {
     let result;
@@ -2836,11 +2857,13 @@ app.post('/api/screen', (req, res) => {
       if (recent) {
         const ageDays = Math.round((Date.now() - recent.screenedAt.getTime()) / 86400000);
         console.log(`    [${company_}] [recall-track] Found in repository (screened ${recent.screenedAt.toISOString().slice(0,10)}, ${ageDays}d ago) — running delta scan`);
+        emit(`🔄 Repository recall — delta scan (last screened ${ageDays}d ago)`);
         const delta = await deltaScreenWithClaude(company_, recent.result, recent.screenedAt, client, websiteUrl || recent.result.website || null);
         result = mergeWithDelta(recent.result, delta, recent.screenedAt);
         console.log(`    [${company_}] [recall-track] Delta: ${result.deltaFindings}`);
+        emit(`🔄 Delta: ${result.deltaFindings || 'no changes'}`);
       } else {
-        result = await screenWithClaude(company_, client, websiteUrl || null, skipPharmcube ? { skipPharmcube } : {});
+        result = await screenWithClaude(company_, client, websiteUrl || null, skipPharmcube ? { skipPharmcube, emit } : { emit });
         applyAutoFlags(result);
         logScreeningBreakdown(result);
         console.log(`    [${company_}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
@@ -2889,6 +2912,8 @@ app.post('/api/screen/website-track', (req, res) => {
 
   const jobId = createJob();
   res.json({ jobId });
+
+  const emit = line => emitProgress(jobId, line);
 
   (async () => {
     let result;
