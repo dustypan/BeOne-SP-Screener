@@ -2108,6 +2108,19 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
 
   const steps345Instruction = `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`;
 
+  // For thin-coverage companies, pre-fetch the company website so Claude has richer
+  // asset data without needing to spend a tool-call turn on it.
+  let websiteContent = null;
+  if (thinCoverage && companyWebsite) {
+    console.log(`    [${companyName}] [citeline] thin coverage — pre-fetching website: ${companyWebsite}`);
+    emit('🌐 Thin coverage — fetching company website…');
+    try {
+      websiteContent = await fetchWebpage(companyWebsite);
+    } catch (e) {
+      console.log(`    [${companyName}] [citeline] website pre-fetch failed: ${e.message}`);
+    }
+  }
+
   const messages = [{
     role: 'user',
     content:
@@ -2115,6 +2128,9 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
       `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
       `${assetLines}\n\n` +
       `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
+      (websiteContent
+        ? `COMPANY WEBSITE CONTENT (pre-fetched — thin Citeline coverage):\n${websiteContent}\n\n`
+        : '') +
       steps345Instruction,
   }];
 
