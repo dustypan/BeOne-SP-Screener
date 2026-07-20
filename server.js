@@ -656,7 +656,7 @@ REQUIRED JSON OUTPUT:
   "type": "public" | "private" | "unknown",
   "website": "url or null",
   "status": "qualifying" | "excluded" | "inconclusive",
-  "excludedAt": null | "pre-filter" | "layer1" | "layer2" | "layer4" | "layer5",
+  "excludedAt": null | "pre-filter" | "layer1" | "layer2" | "layer3" | "layer4" | "layer5",
   "excludedReason": "",
   "excludedSource": "url or empty string — the specific page/filing/press release that is the basis for excludedReason, if there is one (leave empty for a Big Pharma pre-filter match, there's no source for that)",
   "inconclusiveReason": "",
@@ -948,14 +948,14 @@ Step 4 — Licensing/Rights (per asset still passing after Step 3):
   parties retain rights and are not exclusion events.
 
   — transaction_type contains "Option" OR "License Option" OR agreement_type contains "Option" →
-    layer3: fail, excluded regardless of territory.
+    layer4: fail, excluded regardless of territory.
     Note in asset notes: "License option granted — asset encumbered. Partner: [name], Date: [date]"
-  — Deal with explicit rights-transfer language, territory = Global or US → layer3: fail, excluded (note partner + date)
-  — Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) → layer3: pass
-  — Deal with explicit rights-transfer language, territory unspecified or empty → layer3: fail, excluded
+  — Deal with explicit rights-transfer language, territory = Global or US → layer4: fail, excluded (note partner + date)
+  — Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) → layer4: pass
+  — Deal with explicit rights-transfer language, territory unspecified or empty → layer4: fail, excluded
     Note in asset notes: "Out-licensed — no territory disclosed, assumed global. Partner: [name], Date: [date]"
-  — Collaboration / co-development with no rights-transfer language → layer3: pass (note deal in researchNotes)
-  — No matching rights-transfer deal → layer3: pass
+  — Collaboration / co-development with no rights-transfer language → layer4: pass (note deal in researchNotes)
+  — No matching rights-transfer deal → layer4: pass
 
 Step 5 — US Manufacturing (per asset still passing Step 4):
   Keywords: manufactur, cdmo, cmo, contract manufactur, supply agreement, tech transfer, bioreactor,
@@ -965,13 +965,13 @@ Step 5 — US Manufacturing (per asset still passing Step 4):
     Look at the name of the manufacturing party (the CDMO / non-screened-company party).
     Entity names carry geographic identifiers — read them literally:
 
-    Entity name implies a SPECIFIC NON-US location → no US capacity from this entity → layer4: PASS:
+    Entity name implies a SPECIFIC NON-US location → no US capacity from this entity → layer5: PASS:
       "(Shanghai)", "(Suzhou)", "(Wuxi)", "(Beijing)", any "(China)" city, "Co Ltd" Chinese suffix,
       "(Korea)", "(Seoul)", "(Ireland)" alone without US partner, "(Germany)", "(Switzerland)" alone,
       "(Japan)", "(Singapore)", "(India)"
       Example: "WuXi Biologics (Shanghai) Co Ltd" → Shanghai entity → non-US → PASS
 
-    Entity name implies a GLOBAL CDMO or US presence → has or may have US drug-substance capacity → layer4: FAIL:
+    Entity name implies a GLOBAL CDMO or US presence → has or may have US drug-substance capacity → layer5: FAIL:
       No geographic qualifier or qualifier includes "Global", "Inc" (US corporate suffix), "(USA)",
       "(US)", "North America", "United States", or is a well-known global CDMO with US sites:
       Lonza, WuXi Biologics (global CDMO regardless of which subsidiary entity), Fujifilm Diosynth,
@@ -979,15 +979,15 @@ Step 5 — US Manufacturing (per asset still passing Step 4):
       Samsung Biologics
       Example: "Lonza AG" → global CDMO with US sites → FAIL
 
-    Truly ambiguous (cannot tell from entity name) → layer4: PASS + add "check-mfg-partner" to flags[]
+    Truly ambiguous (cannot tell from entity name) → layer5: PASS + add "check-mfg-partner" to flags[]
 
   Per asset:
-  — Manufacturing deal, territory explicitly includes Global or US → layer4: fail, excluded (note CDMO entity + date)
-  — Manufacturing deal, territory explicitly non-US (China, Asia, Europe) → layer4: pass
-  — Manufacturing deal, territory unspecified, CDMO entity = specific non-US location → layer4: pass
-  — Manufacturing deal, territory unspecified, CDMO entity = global or US-capable → layer4: fail, excluded (note CDMO entity + date)
-  — Manufacturing deal, territory unspecified, CDMO entity truly ambiguous → layer4: pass + add "check-mfg-partner" to flags[]
-  — No matching manufacturing deal → layer4: pass (manufacturing gap confirmed)
+  — Manufacturing deal, territory explicitly includes Global or US → layer5: fail, excluded (note CDMO entity + date)
+  — Manufacturing deal, territory explicitly non-US (China, Asia, Europe) → layer5: pass
+  — Manufacturing deal, territory unspecified, CDMO entity = specific non-US location → layer5: pass
+  — Manufacturing deal, territory unspecified, CDMO entity = global or US-capable → layer5: fail, excluded (note CDMO entity + date)
+  — Manufacturing deal, territory unspecified, CDMO entity truly ambiguous → layer5: pass + add "check-mfg-partner" to flags[]
+  — No matching manufacturing deal → layer5: pass (manufacturing gap confirmed)
   Always note the CDMO entity name, deal date, and outcome in the asset's notes field.
 
 DEAL NOTES — MANDATORY for every asset that reaches Steps 4+5:
@@ -2326,41 +2326,41 @@ about which sources actually exist to read.
 
 STEP 2 — MANDATORY PRIMARY-SOURCE READ (do this regardless of how confident you already feel — this is not optional):
 
-Unified Layer 4 manufacturing escalation (used by ALL tracks when Layer 4 is ambiguous after
+Unified Layer 5 manufacturing escalation (used by ALL tracks when Layer 5 is ambiguous after
 the primary-source read — stop as soon as you have a clear answer):
-  L4-a: Fetch company newsroom / press releases page (/news, /press, /media) — 0 extra calls
-         if already fetched for Layer 3, otherwise 1 fetch.
-  L4-b: web_search: "${companyName}" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
+  L5-a: Fetch company newsroom / press releases page (/news, /press, /media) — 0 extra calls
+         if already fetched for Layer 4, otherwise 1 fetch.
+  L5-b: web_search: "${companyName}" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
          "Thermo Fisher" OR "Catalent" OR "Fujifilm Diosynth" OR "AGC Biologics") manufacturing
          + fetch top result if relevant.
-  L4-c: web_search: "${companyName}" biologics manufacturing CDMO "United States" OR "US facility"
+  L5-c: web_search: "${companyName}" biologics manufacturing CDMO "United States" OR "US facility"
          + fetch top result if relevant.
-  Default: PASS + add "check-mfg-partner" to flags[] if still unresolved after L4-c.
-  Tag all Layer 4 escalation sources with usedFor: "Layer 4 manufacturing" in sources[].
+  Default: PASS + add "check-mfg-partner" to flags[] if still unresolved after L5-c.
+  Tag all Layer 5 escalation sources with usedFor: "Layer 5 manufacturing" in sources[].
 
 - SEC-FILING track: call lookup_sec_filing(ticker) once, then fetch_webpage the result once
-  (defaults to section "item1" — Business). This is your primary source for ALL of Layers 1-4
+  (defaults to section "item1" — Business). This is your primary source for ALL of Layers 1-5
   in one read.
-    - If Item 1 leaves Layer 3 (rights) or Layer 4 (manufacturing) genuinely ambiguous,
+    - If Item 1 leaves Layer 4 (rights) or Layer 5 (manufacturing) genuinely ambiguous,
       fetch_webpage the SAME filing URL again with section: "item7" (MD&A) — one additional
       call, can resolve ambiguity on both layers at once.
-    - If Layer 4 specifically (does the company own a US facility) is still unclear after that,
+    - If Layer 5 specifically (does the company own a US facility) is still unclear after that,
       fetch_webpage the SAME filing URL again with section: "item2" (Properties) — short
       section, fast read.
-    - If Layer 4 is still ambiguous after item7 + item2 (10-Ks can be up to a year stale):
-      run the unified Layer 4 escalation above (L4-a through L4-d).
-    - Layer 3 ambiguity only: ONE web_search("${companyName} out-license OR partnership OR
+    - If Layer 5 is still ambiguous after item7 + item2 (10-Ks can be up to a year stale):
+      run the unified Layer 5 escalation above (L5-a through L5-c).
+    - Layer 4 ambiguity only: ONE web_search("${companyName} out-license OR partnership OR
       option rights terminated") — snippets only, no further fetch.
 
 - HKEX-FILING track (HKEX-listed companies):
   Step A: web_search: "${companyName}" site:hkexnews.hk "annual report" 2024 OR 2025
     From the search results, identify the direct hkexnews.hk URL for the most recent annual
     report or annual results document. Count this as one search call.
-  Step B: fetch_webpage that hkexnews.hk URL. This is your primary source for ALL of Layers 1-4,
+  Step B: fetch_webpage that hkexnews.hk URL. This is your primary source for ALL of Layers 1-5,
     same role as Item 1 Business in a 10-K. Count this as one fetch.
-  Step C: If Layer 3 or Layer 4 remain ambiguous after the annual filing:
-    Layer 3: ONE web_search("${companyName} out-license OR partnership OR option rights terminated")
-    Layer 4: run the unified Layer 4 escalation above (L4-a through L4-d).
+  Step C: If Layer 4 or Layer 5 remain ambiguous after the annual filing:
+    Layer 4: ONE web_search("${companyName} out-license OR partnership OR option rights terminated")
+    Layer 5: run the unified Layer 5 escalation above (L5-a through L5-c).
   Fallback A: if the hkexnews.hk document is a PDF that doesn't render usable text, try
     fetching the company's Annual Results announcement (HTML) — usually also listed on hkexnews.hk
     for the same period. Count as one additional fetch.
@@ -2372,10 +2372,10 @@ the primary-source read — stop as soon as you have a clear answer):
     Count this as one call.
   Step B: From the IR page, find the most recent annual report or equivalent filing link.
     Terms: Annual Report, Annual Results, 年報, 年度报告, Annual Review, Prospectus.
-    Fetch that document — primary source for ALL of Layers 1-4. Count as one call.
-  Step C: If Layer 3 or Layer 4 remain ambiguous:
-    Layer 3: ONE web_search("${companyName} out-license OR partnership OR option rights terminated")
-    Layer 4: run the unified Layer 4 escalation above (L4-a through L4-d).
+    Fetch that document — primary source for ALL of Layers 1-5. Count as one call.
+  Step C: If Layer 4 or Layer 5 remain ambiguous:
+    Layer 4: ONE web_search("${companyName} out-license OR partnership OR option rights terminated")
+    Layer 5: run the unified Layer 5 escalation above (L5-a through L5-c).
   Fallback A: if the annual report is a PDF that doesn't render, fetch the Annual Results
     announcement HTML instead (linked from same IR page).
   Fallback B: if IR page fails to load or no annual report link found, fall through to
@@ -2386,15 +2386,15 @@ the primary-source read — stop as soon as you have a clear answer):
   (If step 0a already landed on that page, it counts — otherwise fetch it now.)
   This is your primary source for Layers 1-2. Do not finalize Layers 1-2 from the homepage alone.
 
-STEP 3 — Layer 3/4 evidence (WEBSITE track only — other tracks covered this in step 2):
-Layer 3 (rights): fetch_webpage their news/press page once and scan for rights-transfer keywords
+STEP 3 — Layer 4/5 evidence (WEBSITE track only — other tracks covered this in step 2):
+Layer 4 (rights): fetch_webpage their news/press page once and scan for rights-transfer keywords
   (license, out-license, divest, option, collaboration, terminated). Note whether any found
   agreement is fill & finish / drug product only (does not exclude) vs. drug substance (excludes).
-  If Layer 3 still ambiguous: ONE web_search("${companyName} out-license OR partnership OR option
+  If Layer 4 still ambiguous: ONE web_search("${companyName} out-license OR partnership OR option
   rights terminated") — snippets only.
 
-Layer 4 (manufacturing): run the unified Layer 4 escalation from Step 2 (L4-a through L4-c).
-  L4-a (newsroom) may already be fetched from the Layer 3 scan above — 0 extra calls if so.
+Layer 5 (manufacturing): run the unified Layer 5 escalation from Step 2 (L5-a through L5-c).
+  L5-a (newsroom) may already be fetched from the Layer 4 scan above — 0 extra calls if so.
 
 ONLY NOW does "stop once confident" apply: once steps 0-3 above are complete for your track,
 the budget is a ceiling, not a target — the moment you have enough to answer confidently, stop
@@ -2406,8 +2406,8 @@ all layers. Example: 13 assets screened out + 1 asset passes every layer → com
 Never set status="excluded" while any single asset still has overallStatus="qualifying".
 
 LAYER EVALUATION:
-Evaluate Layers 1 → 2 → 5 → 3 → 4 in that order from whatever you've fetched in steps 0-3.
-Layer 5 (competitive overlap) runs RIGHT AFTER Layer 2 — before you assess Layers 3 and 4. Assets that fail Layer 5 do not need Layer 3/4 assessed.
+Evaluate Layers 1 → 2 → 3 → 4 → 5 in that order from whatever you've fetched in steps 0-3.
+Layer 3 (competitive overlap) runs RIGHT AFTER Layer 2 — before you assess Layers 4 and 5. Assets that fail Layer 3 do not need Layers 4/5 assessed.
 Do not make additional tool calls to firm up an answer — if something is genuinely unclear, mark that layer "inconclusive" and move on.
 IMPORTANT: populate "assets" with EVERY individually named asset you saw — one object per named drug/program at any phase (Discovery, Preclinical, Lead Opt, IND-Enabling, Phase 1/2/3, Approved). Do not filter by phase. Do not collapse. Do not add tool calls for individual assets; extract all from pages already fetched.
 Return the JSON screening result now.`
@@ -2620,15 +2620,13 @@ function logScreeningBreakdown(result) {
 
   result.assets.forEach((asset, i) => {
     console.log(`    ${tag} Asset ${i + 1}/${result.assets.length}: ${asset.name} (${asset.modality || '?'})`);
-    for (const layer of ['layer1', 'layer2', 'layer3', 'layer4']) {
+    for (const layer of ['layer1', 'layer2', 'layer3', 'layer4', 'layer5']) {
       const l = asset[layer];
       if (l) console.log(`      ${tag} [${layer}] ${l.status}${l.reason ? ' — ' + l.reason : ''}`);
     }
     console.log(`      ${tag} [overall] ${asset.overallStatus}`);
   });
 
-  // Layer 5 (direct competitor check) runs client-side in the browser —
-  // it just compares modality+targets against BEONE_PIPELINE, no research needed.
   if (result.researchNotes) console.log(`    ${tag} [notes] ${result.researchNotes}`);
 }
 
@@ -2681,7 +2679,7 @@ function buildScreenerLog(result) {
 
   result.assets.forEach((asset, i) => {
     lines.push(`${tag} Asset ${i + 1}/${result.assets.length}: ${asset.name} (${asset.modality || '?'})`);
-    for (const layer of ['layer1', 'layer2', 'layer3', 'layer4']) {
+    for (const layer of ['layer1', 'layer2', 'layer3', 'layer4', 'layer5']) {
       const l = asset[layer];
       if (l) lines.push(`  ${tag} [${layer}] ${l.status}${l.reason ? ' — ' + l.reason : ''}`);
     }
