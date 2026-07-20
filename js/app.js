@@ -1109,6 +1109,7 @@ function renderResultsTable() {
             <td class="co-cell" rowspan="${rowspan}">
               <div class="co-cell-inner">
                 <strong class="co-name">${escHtml(c.name)}</strong>
+                <span class="qualifying-check-badge" title="Qualifying company">&#10003; Qualifying</span>
                 ${c.type ? `<span class="type-badge ${c.type}">${c.type === 'public' ? 'Public' : 'Private'}</span>` : ''}
                 ${c.recallTrack ? `<span class="recall-badge" title="Served from repository — last screened ${(c.lastScreenedAt || '').slice(0,10)}">🔄 Recall</span>` : ''}
                 ${c.website ? `<a class="co-cell-btn" href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '📋 10-K' : '🌐 Pipeline'}</a>` : ''}
@@ -1327,7 +1328,8 @@ function renderExcludedFooter() {
     state.beoneReviews[c.id] === 'negative' && !seenIds.has(c.id)
   );
 
-  const allItems = screenerExcluded.length + userExcluded.length;
+  // allExcluded computed below in screenerRows block; approximate here for guard
+  const allItems = screenerExcluded.filter(c => { const a = c.assets||[]; return a.length===0||a.every(x=>x.overallStatus==='excluded'); }).length + userExcluded.length;
   if (allItems === 0) {
     section.classList.add('hidden');
     return;
@@ -1335,18 +1337,27 @@ function renderExcludedFooter() {
 
   section.classList.remove('hidden');
 
-  const screenerRows = screenerExcluded.map(c => {
+  // Only include companies where every asset is excluded
+  const allExcluded = screenerExcluded.filter(c => {
+    const assets = c.assets || [];
+    return assets.length === 0 || assets.every(a => a.overallStatus === 'excluded');
+  });
+
+  const screenerRows = allExcluded.map(c => {
     let sourceLink = '—';
     if (c.excludedSource) {
       sourceLink = `<a href="${escHtml(c.excludedSource)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`;
     } else if (c.website) {
       sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
     }
+    const layerLabel = c.excludedAt === 'pre-filter' ? 'Pre-filter'
+      : c.excludedAt ? `Step ${c.excludedAt.replace('layer', '')}` : '—';
+    const rationale = c.excludedReason || '—';
     return `
       <tr>
-        <td>${escHtml(c.name)}</td>
-        <td>${escHtml(c.excludedAt || '—')}</td>
-        <td>${escHtml(c.excludedReason || '—')}</td>
+        <td><span class="excluded-x-badge" title="All assets excluded">✗</span> ${escHtml(c.name)}</td>
+        <td>${layerLabel}</td>
+        <td class="excluded-rationale">${escHtml(rationale)}</td>
         <td>${sourceLink}</td>
         <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
         <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
@@ -1369,7 +1380,7 @@ function renderExcludedFooter() {
 
   tbody.querySelectorAll('.btn-console-view').forEach(btn => {
     btn.addEventListener('click', () => {
-      const company = [...screenerExcluded, ...userExcluded].find(c => c.id === btn.dataset.id);
+      const company = [...(allExcluded||screenerExcluded), ...userExcluded].find(c => c.id === btn.dataset.id);
       if (company) openConsoleModal(company.name, company.screenerLog);
     });
   });

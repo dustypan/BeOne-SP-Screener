@@ -553,6 +553,12 @@ Pass: has mAb/bsAb/tsAb/ADC/TCE/NKCE/Fc-fusion/Immunocytokine in CHO/mammalian e
 Fail: only excluded modalities → excludedAt: "layer2"
 Platform record: if site describes a general oncology biologic platform without named candidates, create one asset with isPlatform: true
 Note: a mixed-modality pipeline (mostly small molecules but with some ADCs/mAbs) still passes if any qualifying asset exists. A company is only excluded at Layer 2 if NONE of its assets qualify.
+MANUFACTURING ROLE CHECK (Layer 2 sub-rule): The company must actually produce or intend to produce the biologic drug substance (cell line / protein) itself. If the company's only biologic connection is a non-manufacturing support role, fail Layer 2:
+  — AI/computational design only (e.g. Insilico Medicine providing discovery AI for a partner's antibody — they do not produce the protein)
+  — Contributing only the small-molecule side of an ADC (linker/payload only; another party makes the antibody)
+  — Pure platform licensor where the licensee manufactures the drug substance
+Examples that PASS: a company developing the antibody component of an ADC even if they outsource conjugation; a company with an AI platform that also produces its own biologic candidates.
+Set layer2: fail, reason: "Non-manufacturing biologic role: [describe role]" → excludedAt: "layer2"
 ENUMERATE ALL ASSETS — list every individually named asset from the pipeline page as a separate asset object regardless of phase. Discovery, Preclinical, Lead Opt, IND-Enabling, Phase 1/2/3, Approved — all are included. If the table has 10 rows, output 10 objects. Do NOT filter by phase, do NOT collapse the pipeline into one representative asset, do NOT summarize as "several mAbs". Extract all rows from what you already fetched — do not make extra tool calls per asset.
 
 LAYER 3 — Competitive Overlap (evaluate HERE, immediately after Layer 2, BEFORE Layers 4 and 5)
@@ -1566,7 +1572,7 @@ const QUALIFYING_BIOLOGIC_MODALITIES = new Set([
 
 // ─────────────────────────────────────────────────────────────
 // Citeline spreadsheet loader — file-based primary when SQL auth
-// is unavailable (BeiGene Conditional Access policy blocks direct
+// is unavailable (BeOne Conditional Access policy blocks direct
 // connection from unmanaged devices). Falls back to SQL if no file.
 // ─────────────────────────────────────────────────────────────
 
@@ -1590,7 +1596,7 @@ function loadCitelineSpreadsheet() {
   const candidates = [
     path.join(__dirname, 'citeline-data', 'Citeline_Screener_Data.xlsx'),
     path.join(__dirname, 'Citeline_Screener_Data.xlsx'),
-    'C:/Users/arjun.shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
+    'C:/Users/arjun.shah/OneDrive - BeOne/Citeline_Screener_Data.xlsx',
   ];
   const filePath = candidates.find(p => fs.existsSync(p));
   if (!filePath) {
@@ -1668,7 +1674,7 @@ function citelineGetAssetsLocal(companyName) {
 
   const rows = Object.values(byDrugId).map(r => ({
     drugId:           r.drugId,
-    drug:             r.drugPrimaryName ? r.drugPrimaryName.replace(/BeiGene/gi, 'BeOne') : r.drugPrimaryName,
+    drug:             r.drugPrimaryName ? r.drugPrimaryName.replace(/BeOne/gi, 'BeOne') : r.drugPrimaryName,
     altNames:         r.altNames        || '',
     citelineModality: r.drugTypeCaption,
     citelinePhase:    r.globalStatus,
