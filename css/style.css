@@ -311,8 +311,9 @@ a:hover { text-decoration: underline; }
 
 /* Console float button — shown on loading + homepage sections */
 .console-float-btn {
-  margin-top: 18px;
-  font-size: 12.5px;
+  margin-top: 0;
+  padding: 9px 20px;
+  font-size: 14px;
   opacity: .85;
 }
 .console-float-btn:hover { opacity: 1; }
