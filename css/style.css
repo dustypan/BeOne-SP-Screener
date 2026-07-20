@@ -309,6 +309,14 @@ a:hover { text-decoration: underline; }
 
 .criteria-list li strong { color: var(--navy-mid); font-weight: 600; }
 
+/* How to Use — grid so all descriptions left-align */
+.how-list li {
+  display: grid;
+  grid-template-columns: 14px 86px 1fr;
+  gap: 0 7px;
+  align-items: baseline;
+}
+
 .upload-intro h2 {
   font-size: 22px;
   font-weight: 700;
