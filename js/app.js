@@ -1328,8 +1328,7 @@ function renderExcludedFooter() {
     state.beoneReviews[c.id] === 'negative' && !seenIds.has(c.id)
   );
 
-  // allExcluded computed below in screenerRows block; approximate here for guard
-  const allItems = screenerExcluded.filter(c => { const a = c.assets||[]; return a.length===0||a.every(x=>x.overallStatus==='excluded'); }).length + userExcluded.length;
+  const allItems = screenerExcluded.length + userExcluded.length;
   if (allItems === 0) {
     section.classList.add('hidden');
     return;
@@ -1337,13 +1336,7 @@ function renderExcludedFooter() {
 
   section.classList.remove('hidden');
 
-  // Only include companies where every asset is excluded
-  const allExcluded = screenerExcluded.filter(c => {
-    const assets = c.assets || [];
-    return assets.length === 0 || assets.every(a => a.overallStatus === 'excluded');
-  });
-
-  const screenerRows = allExcluded.map(c => {
+  const screenerRows = screenerExcluded.map(c => {
     let sourceLink = '—';
     if (c.excludedSource) {
       sourceLink = `<a href="${escHtml(c.excludedSource)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`;
@@ -1380,7 +1373,7 @@ function renderExcludedFooter() {
 
   tbody.querySelectorAll('.btn-console-view').forEach(btn => {
     btn.addEventListener('click', () => {
-      const company = [...(allExcluded||screenerExcluded), ...userExcluded].find(c => c.id === btn.dataset.id);
+      const company = [...screenerExcluded, ...userExcluded].find(c => c.id === btn.dataset.id);
       if (company) openConsoleModal(company.name, company.screenerLog);
     });
   });
