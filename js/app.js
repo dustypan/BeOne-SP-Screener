@@ -441,9 +441,16 @@ function renderSummary() {
   setCount('count-excluded', excluded.length);
   setCount('count-inconclusive', inconclusive.length);
 
-  renderBucketList('list-qualifying', qualifying, c =>
-    `${(c.assets || []).filter(a => !a.layer3 || a.layer3.status !== 'fail').length} asset(s) qualifying`
-  );
+  renderBucketList('list-qualifying', qualifying, c => {
+    const total = (c.assets || []).length;
+    const qual  = (c.assets || []).filter(a =>
+      a.overallStatus !== 'excluded' &&
+      (!a.layer3 || a.layer3.status !== 'fail') &&
+      (!a.layer4 || a.layer4.status === 'pass') &&
+      (!a.layer5 || a.layer5.status === 'pass')
+    ).length;
+    return total > qual ? `${qual}/${total} qualifying` : `${qual} qualifying`;
+  });
   renderBucketList('list-excluded', excluded, c => {
     const at = c.excludedAt ? ` (Layer ${c.excludedAt.replace('layer', '')})` : c.excludedAt === 'pre-filter' ? ' (Pre-filter)' : '';
     return (c.excludedReason || 'Screened out') + at;
