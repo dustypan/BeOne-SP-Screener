@@ -1506,7 +1506,6 @@ async function runAutoFlag() {
   let done = 0;
 
   for (const company of companies) {
-    statusEl.textContent = `Flagging ${done + 1} of ${companies.length}: ${company.name}…`;
     try {
       const resp = await fetch('/api/autoflag', {
         method: 'POST',
