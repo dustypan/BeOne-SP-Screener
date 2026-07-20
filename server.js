@@ -2077,7 +2077,7 @@ async function screenWithCitelinePrimary(companyName, client) {
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 8000,
+      max_tokens: 16000,
       temperature: 0,
       system: CITELINE_PRIMARY_PROMPT,
       tools: CITELINE_TOOLS,
@@ -2171,12 +2171,16 @@ async function screenWithCitelinePrimary(companyName, client) {
         toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
       }
       messages.push({ role: 'user', content: toolResults });
+    } else if (response.stop_reason === 'max_tokens') {
+      console.log(`    [${companyName}] [citeline] [max_tokens] output cut off — nudging to continue`);
+      messages.push({ role: 'user', content: 'Your output was cut off. Continue and complete the JSON screening result now.' });
     } else {
+      console.log(`    [${companyName}] [citeline] [unexpected] stop_reason=${response.stop_reason} — exiting loop`);
       break;
     }
   }
 
-  console.log(`    [${companyName}] [citeline] hit MAX_ITERATIONS — returning inconclusive`);
+  console.log(`    [${companyName}] [citeline] exhausted iteration budget — returning inconclusive`);
   return {
     name: companyName, id: slugify(companyName), type: 'unknown', website: companyWebsite,
     status: 'inconclusive', sourceTrack: 'citeline', excludedAt: null, excludedReason: '',
