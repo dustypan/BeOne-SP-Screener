@@ -1624,12 +1624,6 @@ function loadCitelineSpreadsheet() {
 }
 
 const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
-// Citeline status values that indicate no active development. Assets with these
-// statuses are filtered out before screening. If ALL of a company's Citeline assets
-// are inactive, the screener auto-routes to the Citeline website track.
-const INACTIVE_CITELINE_STATUSES = new Set([
-  'No Development Reported', 'Ceased', 'Discontinued', 'Withdrawn', 'Suspended'
-]);
 
 function citelineGetAssetsLocal(companyName) {
   const needle = stemCompany(companyName);
@@ -2092,31 +2086,13 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
     }, citelineWebsite };
   }
 
-  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets found`);
+  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
 
-  // Filter out inactive assets — only pass active pipeline to Claude
-  const activeRows = rows.filter(r =>
-    !INACTIVE_CITELINE_STATUSES.has(r.status) &&
-    !INACTIVE_CITELINE_STATUSES.has(r.citelinePhase)
-  );
+  const thinCoverage = rows.length <= 2
+    || rows.some(r => !r.targets || r.targets.trim() === '')
+    || rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
 
-  // If ALL assets are inactive (Ceased/NDR), auto-route to website track using Citeline URL
-  if (rows.length > 0 && activeRows.length === 0) {
-    console.log(`    [${companyName}] [citeline] all ${rows.length} asset(s) inactive (Ceased/NDR) — routing to website track`);
-    emit('🌐 Citeline: all assets inactive — routing to website track');
-    return { result: null, citelineWebsite: companyWebsite, allInactive: true };
-  }
-
-  const inactiveFiltered = rows.length - activeRows.length;
-  if (inactiveFiltered > 0) {
-    console.log(`    [${companyName}] [citeline] ${activeRows.length} active asset(s) (${inactiveFiltered} inactive filtered out)`);
-  }
-
-  const thinCoverage = activeRows.length <= 2
-    || activeRows.some(r => !r.targets || r.targets.trim() === '')
-    || activeRows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
-
-  const assetLines = activeRows.map((r, i) => {
+  const assetLines = rows.map((r, i) => {
     const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
     const phase    = CITELINE_PHASE_MAP[r.citelinePhase] || r.citelinePhase || 'Unknown';
     let line =
@@ -2136,7 +2112,7 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
     role: 'user',
     content:
       `Screen this company through the Citeline primary track: "${companyName}"\n\n` +
-      `CITELINE DATABASE — Steps 1+2 complete (${activeRows.length} active qualifying oncology biologic assets):\n\n` +
+      `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
       `${assetLines}\n\n` +
       `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
       steps345Instruction,
