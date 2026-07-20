@@ -309,6 +309,14 @@ a:hover { text-decoration: underline; }
 
 .criteria-list li strong { color: var(--navy-mid); font-weight: 600; }
 
+/* Console float button — shown on loading + homepage sections */
+.console-float-btn {
+  margin-top: 18px;
+  font-size: 12.5px;
+  opacity: .85;
+}
+.console-float-btn:hover { opacity: 1; }
+
 /* How to Use — grid so all descriptions left-align */
 .how-list li {
   display: grid;

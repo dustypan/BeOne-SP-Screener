@@ -41,6 +41,32 @@ const state = {
 // ──────────────────────────────────────────────────────────────
 
 // ───────────────────────────────────────────────────────────────
+// Run Console — global log visible on any section
+// ───────────────────────────────────────────────────────────────
+
+function appendToRunLog(line) {
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+  state.runLog.push(`[${ts}] ${line}`);
+  if (state.runLogOpen) {
+    const pre = document.getElementById('console-modal-log');
+    if (pre) { pre.textContent = state.runLog.join('\n'); pre.scrollTop = pre.scrollHeight; }
+  }
+}
+
+function openRunConsole() {
+  state.runLogOpen = true;
+  const log = state.runLog.length ? state.runLog.join('\n') : '(No run started yet — press Run Screener to begin)';
+  const modal = document.getElementById('console-modal');
+  document.getElementById('console-modal-title').textContent = 'Run Console';
+  document.getElementById('console-modal-log').textContent = log;
+  const pre = document.getElementById('console-modal-log');
+  pre.scrollTop = pre.scrollHeight;
+  modal.classList.remove('hidden');
+  const close = () => { state.runLogOpen = false; modal.classList.add('hidden'); };
+  document.getElementById('close-console-btn').onclick = close;
+  document.getElementById('console-modal-overlay').onclick = close;
+}
+
 
 function loadPersisted() {
   try {
@@ -261,16 +287,6 @@ async function runScreener(names) {
     });
   }
 
-  function appendToRunLog(line) {
-    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-    state.runLog.push(`[${ts}] ${line}`);
-    // If console modal is open, refresh it live
-    if (state.runLogOpen) {
-      const pre = document.getElementById('console-modal-log');
-      if (pre) { pre.textContent = state.runLog.join('\n'); pre.scrollTop = pre.scrollHeight; }
-    }
-  }
-
   async function screenOne(i) {
     const name = names[i];
 
@@ -311,19 +327,51 @@ async function runScreener(names) {
         }
 
         companies[i] = result;
-        // Log result summary to run console
+        // Log enriched result to run console
         const assetCount = (result.assets || []).length;
         const statusIcon = result.status === 'qualifying' ? '✓' : result.status === 'excluded' ? '✗' : '⚠';
-        const dealInfo = (result.deals || []).length ? ` | ${result.deals.length} deal(s)` : '';
-        const layerInfo = (() => {
-          const a = (result.assets || [])[0];
-          if (!a) return '';
+        appendToRunLog(`${statusIcon} ${name} — ${result.status.toUpperCase()} | ${assetCount} asset(s)`);
+        // Asset-by-asset layer breakdown
+        (result.assets || []).forEach((a, idx) => {
+          const aName = a.name || `Asset ${idx + 1}`;
           const layers = ['layer1','layer2','layer3','layer4','layer5'];
-          const summary = layers.map(l => a[l] ? `${l.replace('layer','L')}:${a[l].status||'?'}` : '').filter(Boolean).join(' ');
-          return summary ? ` | ${summary}` : '';
-        })();
-        appendToRunLog(`${statusIcon} ${name} — ${result.status} | ${assetCount} asset(s)${dealInfo}${layerInfo}`);
-        if (result.screenerLog) appendToRunLog(`  Rationale: ${result.screenerLog.split('\n')[0]}`);
+          const layerStr = layers.map(l => {
+            if (!a[l]) return null;
+            const icon = a[l].status === 'pass' ? '✓' : a[l].status === 'fail' ? '✗' : '~';
+            return `${l.replace('layer','L')}${icon}`;
+          }).filter(Boolean).join(' ');
+          const modality = a.modality ? ` [${a.modality}]` : '';
+          const targets = (a.targets || []).length ? ` → ${a.targets.join('/')}` : '';
+          appendToRunLog(`  └ ${aName}${modality}${targets} | ${layerStr}`);
+          // First failing layer reason
+          for (const l of layers) {
+            if (a[l] && a[l].status === 'fail' && a[l].reason) {
+              appendToRunLog(`    └ Excluded at ${l.replace('layer','L')}: ${a[l].reason}`);
+              break;
+            }
+          }
+        });
+        // Deals
+        if ((result.deals || []).length) {
+          appendToRunLog(`  💰 ${result.deals.length} deal(s) found:`);
+          result.deals.forEach(d => {
+            const partner = d.partner || d.partnerName || '';
+            const type = d.type || d.dealType || '';
+            const year = d.year || d.date || '';
+            appendToRunLog(`    • ${[partner, type, year].filter(Boolean).join(' | ')}`);
+          });
+        }
+        // Sources consulted
+        const sources = result.sources || result.externalSources || [];
+        if (sources.length) {
+          const srcNames = sources.slice(0, 4).map(s => s.source || s.name || s).filter(Boolean);
+          if (srcNames.length) appendToRunLog(`  🔗 Sources: ${srcNames.join(', ')}`);
+        }
+        // Screener rationale (first 2 non-empty lines)
+        if (result.screenerLog) {
+          const lines = result.screenerLog.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 2);
+          lines.forEach(l => appendToRunLog(`  └ ${l}`));
+        }
       } catch (err) {
         appendToRunLog(`✗ ${name} — ERROR: ${err.message}`);
         // Server not running or network error
@@ -964,19 +1012,7 @@ function renderResults() {
 
   // Run Console button
   const consoleBtn = document.getElementById('run-console-btn');
-  if (consoleBtn) {
-    consoleBtn.onclick = () => {
-      state.runLogOpen = true;
-      const log = state.runLog.length ? state.runLog.join('\n') : '(No run in progress yet)';
-      openConsoleModal('Run Console', log);
-      // Keep updating while open
-      const modalEl = document.getElementById('console-modal');
-      const pre = document.getElementById('console-modal-log');
-      const closeHandler = () => { state.runLogOpen = false; };
-      document.getElementById('close-console-btn').addEventListener('click', closeHandler, { once: true });
-      document.getElementById('console-modal-overlay').addEventListener('click', closeHandler, { once: true });
-    };
-  }
+  if (consoleBtn) consoleBtn.onclick = openRunConsole;
 
   // Auto-run flags when results are first shown (once per run)
   if (!state._flagsDoneForRun) {
@@ -2102,6 +2138,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   loadPersisted();
   initUpload();
+  // Wire console buttons present from page load
+  ['home-console-btn', 'loading-console-btn', 'rescreen-console-btn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', openRunConsole);
+  });
   initColumnPicker();
   initSummary();
   initWizard();
