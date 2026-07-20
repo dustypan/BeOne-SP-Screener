@@ -1334,7 +1334,7 @@ function renderExcludedFooter() {
       sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
     }
     const layerLabel = c.excludedAt === 'pre-filter' ? 'Pre-filter'
-      : c.excludedAt ? `Step ${c.excludedAt.replace('layer', '')}` : '—';
+      : c.excludedAt ? `Step ${c.excludedAt.replace(/^(step|layer)s?\s*/i, '')}` : '—';
     const rationale = c.excludedReason || '—';
     return `
       <tr>
