@@ -2138,11 +2138,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   loadPersisted();
   initUpload();
-  // Wire console buttons present from page load
-  ['home-console-btn', 'loading-console-btn', 'rescreen-console-btn'].forEach(id => {
-    const btn = document.getElementById(id);
-    if (btn) btn.addEventListener('click', openRunConsole);
-  });
+  // Global floating console button
+  const gcb = document.getElementById('global-console-btn');
+  if (gcb) gcb.addEventListener('click', openRunConsole);
   initColumnPicker();
   initSummary();
   initWizard();

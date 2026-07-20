@@ -310,13 +310,27 @@ a:hover { text-decoration: underline; }
 .criteria-list li strong { color: var(--navy-mid); font-weight: 600; }
 
 /* Console float button — shown on loading + homepage sections */
-.console-float-btn {
-  margin-top: 0;
-  padding: 9px 20px;
-  font-size: 14px;
-  opacity: .85;
+.global-console-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: var(--navy);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  transition: background .15s, box-shadow .15s;
+  letter-spacing: .2px;
 }
-.console-float-btn:hover { opacity: 1; }
+.global-console-fab:hover {
+  background: var(--navy-mid);
+  box-shadow: 0 6px 20px rgba(0,0,0,.24);
+}
 
 /* How to Use — grid so all descriptions left-align */
 .how-list li {
