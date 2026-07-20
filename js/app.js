@@ -859,11 +859,7 @@ function computeAvailableTargets() {
       targets.add(formatTargetSet(a.targets));
     }
   }
-  return Array.from(targets).sort((a, b) => {
-    if (a === 'Undisclosed') return 1;
-    if (b === 'Undisclosed') return -1;
-    return a.localeCompare(b);
-  });
+  return Array.from(targets).filter(t => t !== 'Undisclosed').sort((a, b) => a.localeCompare(b));
 }
 
 function renderAsk3() {
