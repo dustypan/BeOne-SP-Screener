@@ -271,6 +271,28 @@ async function runScreener(names) {
     }
   } catch (_) {}
 
+  // Open an SSE stream for a screening job and resolve with the result JSON.
+  // The server sends a heartbeat every 20 s so the proxy never issues a 502,
+  // then fires a 'result' event when the job is done.
+  function streamScreenJob(jobId) {
+    return new Promise((resolve, reject) => {
+      const es = new EventSource(`/api/screen/${jobId}/events`);
+      let settled = false;
+      es.addEventListener('result', e => {
+        if (settled) return; settled = true;
+        es.close();
+        try { resolve(JSON.parse(e.data)); }
+        catch (err) { reject(new Error('Invalid JSON from server')); }
+      });
+      es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED && !settled) {
+          settled = true; es.close();
+          reject(new Error('SSE connection closed before result'));
+        }
+      };
+    });
+  }
+
   async function screenOne(i) {
     const name = names[i];
 
@@ -284,17 +306,18 @@ async function runScreener(names) {
       }
       companies[i] = cached;
     } else {
-      // Not yet screened — call the server
+      // Not yet screened — start job then stream result via SSE (avoids proxy 502)
       try {
-        const resp = await fetch('/api/screen', {
+        const startResp = await fetch('/api/screen', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
           body: JSON.stringify({ company: name, runId: state.currentRunId }),
         });
 
-        if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+        if (!startResp.ok) throw new Error(`Server returned ${startResp.status}`);
 
-        const result = await resp.json();
+        const { jobId } = await startResp.json();
+        const result = await streamScreenJob(jobId);
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -631,7 +654,7 @@ async function runRescreening() {
     const notFoundInPharmcube = /not found in pharmcube/i.test(company.inconclusiveReason || '');
     const skipPharmcube = notFoundInPharmcube;
     try {
-      const resp = await fetch('/api/screen', {
+      const startResp = await fetch('/api/screen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
         body: JSON.stringify({
@@ -641,8 +664,9 @@ async function runRescreening() {
           skipPharmcube,
         }),
       });
-      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const result = await resp.json();
+      if (!startResp.ok) throw new Error(`Server returned ${startResp.status}`);
+      const { jobId } = await startResp.json();
+      const result = await streamScreenJob(jobId);
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -1663,16 +1687,18 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
   btn.textContent = '⏳ Running…';
 
   try {
-    const resp = await fetch('/api/screen/website-track', {
+    const startResp = await fetch('/api/screen/website-track', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
       body: JSON.stringify({ companyName: company.name, websiteUrl: websiteUrl || company.website || '' }),
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${resp.status}`);
+    if (!startResp.ok) {
+      const err = await startResp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${startResp.status}`);
     }
-    const result = await resp.json();
+    const { jobId: wtJobId } = await startResp.json();
+    const result = await streamScreenJob(wtJobId);
+    if (result.error) throw new Error(result.error);
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {

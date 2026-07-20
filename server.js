@@ -2756,76 +2756,115 @@ app.get('/api/runs/:id', async (req, res) => {
 // API endpoint
 // ─────────────────────────────────────────────────────────────
 
-app.post('/api/screen', async (req, res) => {
-  const { company, runId, websiteUrl } = req.body;
+// ─────────────────────────────────────────────────────────────
+// Async job store — lets POST /api/screen return a jobId immediately
+// so the Replit proxy never hits its 30-60 s timeout and issues a 502.
+// Clients poll results via GET /api/screen/:jobId/events (SSE).
+// ─────────────────────────────────────────────────────────────
+const screeningJobs = new Map(); // jobId → { status, result, error, listeners }
+
+function createJob() {
+  const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  screeningJobs.set(jobId, { status: 'running', result: null, error: null, listeners: new Set() });
+  setTimeout(() => screeningJobs.delete(jobId), 15 * 60 * 1000); // GC after 15 min
+  return jobId;
+}
+
+function settleJob(jobId, result) {
+  const job = screeningJobs.get(jobId);
+  if (!job) return;
+  job.status = 'done';
+  job.result = result;
+  job.listeners.forEach(fn => fn(result));
+  job.listeners.clear();
+}
+
+// SSE stream — client connects here to receive the result without holding a long HTTP request open.
+app.get('/api/screen/:jobId/events', (req, res) => {
+  const job = screeningJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Already finished before the client connected
+  if (job.status === 'done') {
+    res.write(`event: result\ndata: ${JSON.stringify(job.result)}\n\n`);
+    return res.end();
+  }
+
+  // Heartbeat every 20 s keeps the Replit proxy from issuing a 502
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 20000);
+
+  const deliver = (result) => {
+    clearInterval(heartbeat);
+    res.write(`event: result\ndata: ${JSON.stringify(result)}\n\n`);
+    res.end();
+  };
+
+  job.listeners.add(deliver);
+  req.on('close', () => { clearInterval(heartbeat); job.listeners.delete(deliver); });
+});
+
+app.post('/api/screen', (req, res) => {
+  const { company, runId, websiteUrl, skipPharmcube } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company name' });
 
   const apiKey = req.headers['x-api-key'] ||
     process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured. Enter your key in the screener settings.' });
 
-  console.log(`\n${'─'.repeat(60)}\n[${company}] Screening: ${company}${websiteUrl ? ` (URL: ${websiteUrl})` : ''}\n${'─'.repeat(60)}`);
+  const jobId = createJob();
+  res.json({ jobId }); // ← returns immediately; screening runs in background below
 
-  try {
-    const client = new Anthropic({ apiKey, maxRetries: 5 });
+  (async () => {
+    let result;
+    const company_ = company; // alias for clarity inside closure
+    try {
+      const client = new Anthropic({ apiKey, maxRetries: 5 });
+      console.log(`\n${'─'.repeat(60)}\n[${company_}] Screening: ${company_}${websiteUrl ? ` (URL: ${websiteUrl})` : ''}\n${'─'.repeat(60)}`);
 
-    // ── Repository recall check ──────────────────────────────
-    const recent = await lookupRecentScreening(company);
-    if (recent) {
-      const ageDays = Math.round((Date.now() - recent.screenedAt.getTime()) / 86400000);
-      console.log(`    [${company}] [recall-track] Found in repository (screened ${recent.screenedAt.toISOString().slice(0,10)}, ${ageDays}d ago) — running delta scan`);
-      const delta  = await deltaScreenWithClaude(company, recent.result, recent.screenedAt, client, websiteUrl || recent.result.website || null);
-      const result = mergeWithDelta(recent.result, delta, recent.screenedAt);
-      console.log(`    [${company}] [recall-track] Delta: ${result.deltaFindings}`);
+      // ── Repository recall check ──────────────────────────────
+      const recent = await lookupRecentScreening(company_);
+      if (recent) {
+        const ageDays = Math.round((Date.now() - recent.screenedAt.getTime()) / 86400000);
+        console.log(`    [${company_}] [recall-track] Found in repository (screened ${recent.screenedAt.toISOString().slice(0,10)}, ${ageDays}d ago) — running delta scan`);
+        const delta = await deltaScreenWithClaude(company_, recent.result, recent.screenedAt, client, websiteUrl || recent.result.website || null);
+        result = mergeWithDelta(recent.result, delta, recent.screenedAt);
+        console.log(`    [${company_}] [recall-track] Delta: ${result.deltaFindings}`);
+      } else {
+        result = await screenWithClaude(company_, client, websiteUrl || null, skipPharmcube ? { skipPharmcube } : {});
+        applyAutoFlags(result);
+        logScreeningBreakdown(result);
+        console.log(`    [${company_}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
+      }
       result.screenerLog = buildScreenerLog(result);
       if (runId) saveCompanyToDb(runId, result);
-      return res.json(result);
+    } catch (err) {
+      const errType   = err.error?.type || '';
+      const errStatus = err.status || 0;
+      const errMsg    = err.message || '';
+      const isTransient =
+        errStatus === 429 || errStatus === 500 || errStatus === 502 ||
+        errStatus === 503 || errStatus === 529 ||
+        errType === 'overloaded_error' || errType === 'api_error' ||
+        /rate.?limit/i.test(errMsg) || /overloaded/i.test(errMsg) || /internal server error/i.test(errMsg);
+      console.error(`  [${company_}] ✗ ${isTransient ? '(transient — safe to re-run) ' : ''}${errMsg}`);
+      result = {
+        name: company_, id: slugify(company_), type: 'unknown', website: null,
+        status: 'inconclusive', excludedAt: null, excludedReason: '',
+        inconclusiveReason: isTransient
+          ? 'Anthropic API hiccup (rate limit/overload/server error) — re-run this company individually, not a research failure'
+          : 'Screening error — see server console',
+        assets: [], beoneAnalyzed: false, beoneOutcome: null, flags: [], researchNotes: errMsg,
+      };
+      result.screenerLog = buildScreenerLog(result);
+      if (runId) saveCompanyToDb(runId, result);
     }
-    // ────────────────────────────────────────────────────────
-
-    const result = await screenWithClaude(company, client, websiteUrl || null);
-    applyAutoFlags(result);
-    logScreeningBreakdown(result);
-    console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
-    result.screenerLog = buildScreenerLog(result);
-    if (runId) saveCompanyToDb(runId, result);
-    res.json(result);
-  } catch (err) {
-    // Classify the error: transient (safe to re-run) vs. genuine failure.
-    // Transient: 429/500/502/503/529 from Anthropic, explicit SDK error types,
-    // or messages containing "overloaded" or "internal server error".
-    const errType   = err.error?.type || '';
-    const errStatus = err.status || 0;
-    const errMsg    = err.message || '';
-    const isTransient =
-      errStatus === 429 || errStatus === 500 || errStatus === 502 ||
-      errStatus === 503 || errStatus === 529 ||
-      errType === 'overloaded_error' || errType === 'api_error' ||
-      /rate.?limit/i.test(errMsg) ||
-      /overloaded/i.test(errMsg) ||
-      /internal server error/i.test(errMsg);
-    console.error(`  [${company}] ✗ ${isTransient ? '(transient — safe to re-run) ' : ''}${errMsg}`);
-    const errorResult = {
-      name: company,
-      id: slugify(company),
-      type: 'unknown',
-      website: null,
-      status: 'inconclusive',
-      excludedAt: null,
-      excludedReason: '',
-      inconclusiveReason: isTransient
-        ? 'Anthropic API hiccup (rate limit/overload/server error) — re-run this company individually, not a research failure'
-        : 'Screening error — see server console',
-      assets: [],
-      beoneAnalyzed: false,
-      beoneOutcome: null,
-      flags: [],
-      researchNotes: errMsg,
-    };
-    errorResult.screenerLog = buildScreenerLog(errorResult);
-    if (runId) saveCompanyToDb(runId, errorResult);
-    res.json(errorResult);
-  }
+    settleJob(jobId, result);
+  })();
 });
 
 
@@ -2835,7 +2874,7 @@ app.post('/api/screen', async (req, res) => {
 // secondary WEBSITE track with the provided URL.
 // ─────────────────────────────────────────────────────────────
 
-app.post('/api/screen/website-track', async (req, res) => {
+app.post('/api/screen/website-track', (req, res) => {
   const { companyName, websiteUrl } = req.body;
   if (!companyName) return res.status(400).json({ error: 'Missing companyName' });
   if (!websiteUrl)  return res.status(400).json({ error: 'Missing websiteUrl — thin-coverage company must have a Citeline website URL' });
@@ -2844,20 +2883,25 @@ app.post('/api/screen/website-track', async (req, res) => {
     process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured.' });
 
-  console.log(`\n${'─'.repeat(60)}\n[${companyName}] Website Track (supplemental): ${websiteUrl}\n${'─'.repeat(60)}`);
+  const jobId = createJob();
+  res.json({ jobId });
 
-  try {
-    const client = new Anthropic({ apiKey, maxRetries: 5 });
-    const result = await screenWithClaude(companyName, client, websiteUrl, { skipCiteline: true });
-    applyAutoFlags(result);
-    logScreeningBreakdown(result);
-    console.log(`    [${companyName}] [website-track FINAL] ${result.status}`);
-    result.screenerLog = buildScreenerLog(result);
-    res.json(result);
-  } catch (err) {
-    console.error(`  [${companyName}] ✗ website-track: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
+  (async () => {
+    let result;
+    try {
+      const client = new Anthropic({ apiKey, maxRetries: 5 });
+      console.log(`\n${'─'.repeat(60)}\n[${companyName}] Website Track (supplemental): ${websiteUrl}\n${'─'.repeat(60)}`);
+      result = await screenWithClaude(companyName, client, websiteUrl, { skipCiteline: true });
+      applyAutoFlags(result);
+      logScreeningBreakdown(result);
+      console.log(`    [${companyName}] [website-track FINAL] ${result.status}`);
+      result.screenerLog = buildScreenerLog(result);
+    } catch (err) {
+      console.error(`  [${companyName}] ✗ website-track: ${err.message}`);
+      result = { error: err.message };
+    }
+    settleJob(jobId, result);
+  })();
 });
 
 // ─────────────────────────────────────────────────────────────
