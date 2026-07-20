@@ -296,19 +296,8 @@ async function runScreener(names) {
   async function screenOne(i) {
     const name = names[i];
 
-    // Use cached result from data.js if available
-    const cached = resolveCompany(name);
-    if (cached.status !== 'inconclusive' || cached.inconclusiveReason !== 'Not yet screened') {
-      // Already screened — use cached
-      if (state.beoneReviews[cached.id] != null) {
-        cached.beoneOutcome = state.beoneReviews[cached.id];
-        cached.beoneAnalyzed = true;
-      }
-      companies[i] = cached;
-      appendToRunLog(`✓ ${name} — recalled from repository (${(cached.assets||[]).length} asset(s))`);
-    } else {
-      // Not yet screened — start job then stream result via SSE (avoids proxy 502)
-      appendToRunLog(`▶ ${name} — screening started`);
+    // Screen fresh — start job then stream result via SSE (avoids proxy 502)
+    appendToRunLog(`▶ ${name} — screening started`);
       try {
         const startResp = await fetch('/api/screen', {
           method: 'POST',
@@ -400,7 +389,6 @@ async function runScreener(names) {
           researchNotes: '',
         };
       }
-    }
 
     completed++;
     bar.classList.remove('progress-starting');

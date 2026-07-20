@@ -2891,22 +2891,10 @@ app.post('/api/screen', (req, res) => {
       const client = new Anthropic({ apiKey, maxRetries: 5 });
       console.log(`\n${'─'.repeat(60)}\n[${company_}] Screening: ${company_}${websiteUrl ? ` (URL: ${websiteUrl})` : ''}\n${'─'.repeat(60)}`);
 
-      // ── Repository recall check ──────────────────────────────
-      const recent = await lookupRecentScreening(company_);
-      if (recent) {
-        const ageDays = Math.round((Date.now() - recent.screenedAt.getTime()) / 86400000);
-        console.log(`    [${company_}] [recall-track] Found in repository (screened ${recent.screenedAt.toISOString().slice(0,10)}, ${ageDays}d ago) — running delta scan`);
-        emit(`🔄 Repository recall — delta scan (last screened ${ageDays}d ago)`);
-        const delta = await deltaScreenWithClaude(company_, recent.result, recent.screenedAt, client, websiteUrl || recent.result.website || null);
-        result = mergeWithDelta(recent.result, delta, recent.screenedAt);
-        console.log(`    [${company_}] [recall-track] Delta: ${result.deltaFindings}`);
-        emit(`🔄 Delta: ${result.deltaFindings || 'no changes'}`);
-      } else {
-        result = await screenWithClaude(company_, client, websiteUrl || null, skipPharmcube ? { skipPharmcube, emit } : { emit });
-        applyAutoFlags(result);
-        logScreeningBreakdown(result);
-        console.log(`    [${company_}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
-      }
+      result = await screenWithClaude(company_, client, websiteUrl || null, skipPharmcube ? { skipPharmcube, emit } : { emit });
+      applyAutoFlags(result);
+      logScreeningBreakdown(result);
+      console.log(`    [${company_}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
       result.screenerLog = buildScreenerLog(result);
       if (runId) saveCompanyToDb(runId, result);
     } catch (err) {
