@@ -172,7 +172,7 @@ app.post('/api/auth/login', (req, res) => {
   AUTH_TOKENS.add(token);
   // 7-day session
   res.setHeader('Set-Cookie',
-    `beo_auth=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${60 * 60 * 24 * 7}`
+    `beo_auth=${token}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=${60 * 60 * 24 * 7}`
   );
   res.json({ ok: true });
 });
