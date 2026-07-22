@@ -978,9 +978,13 @@ tr.row-paused td { background: var(--amber-lt); }
 }
 .asset-row:hover { background: var(--gray-50); }
 .asset-row.competitor { background: #fafafa; color: var(--text-muted); }
+.asset-row.asset-screened-out td { background: #fff5f5; }
+@media (prefers-color-scheme: dark) { .asset-row.asset-screened-out td { background: #2d1a1a; } }
+:root[data-theme="dark"] .asset-row.asset-screened-out td { background: #2d1a1a; }
 .asset-row.company-first-row > td { border-top: 2px solid var(--gray-300); }
 
 .co-cell {
+  position: relative;
   padding: 10px 14px;
   vertical-align: top;
   border-right: 1px solid var(--gray-100);
@@ -1009,6 +1013,29 @@ tr.row-paused td { background: var(--amber-lt); }
   min-width: 120px;
 }
 
+.screened-out-tag {
+  display: inline-block;
+  background: #fde8e8;
+  color: #c0392b;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+@media (prefers-color-scheme: dark) { .screened-out-tag { background: #4a1a1a; color: #f08080; border-color: #7a3030; } }
+:root[data-theme="dark"] .screened-out-tag { background: #4a1a1a; color: #f08080; border-color: #7a3030; }
+
+.screened-out-reason {
+  font-size: 11px;
+  color: #c0392b;
+  font-style: italic;
+}
+@media (prefers-color-scheme: dark) { .screened-out-reason { color: #f08080; } }
+:root[data-theme="dark"] .screened-out-reason { color: #f08080; }
+
 .comp-tag {
   display: inline-block;
   background: var(--gray-100);
@@ -1019,9 +1046,10 @@ tr.row-paused td { background: var(--amber-lt); }
   margin-left: 6px;
 }
 
-.targets-cell {
-  min-width: 120px;
-}
+.targets-cell   { min-width: 120px; }
+.phase-cell     { min-width: 90px; white-space: nowrap; font-size: 12px; color: var(--gray-700); }
+.indication-cell{ min-width: 140px; font-size: 12px; color: var(--gray-700); }
+.undisclosed    { font-size: 11px; color: var(--gray-400); font-style: italic; }
 
 .flags-cell {
   min-width: 180px;
@@ -1140,7 +1168,47 @@ tr.row-paused td { background: var(--amber-lt); }
 .fc-red    { background: #fee2e2; color: #991b1b; }
 .fc-blue   { background: #dbeafe; color: #1e40af; }
 .fc-orange { background: #ffedd5; color: #9a3412; }
+.fc-yellow { background: #fef9c3; color: #854d0e; }
 .source-repeat { font-size: 11px; color: var(--gray-400); font-style: italic; }
+
+/* ── Deals Panel ────────────────────────────────────────────── */
+.co-deals-btn { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.co-deals-btn:hover { background: #bae6fd; }
+.deals-panel { display: none; margin-top: 8px; border-top: 1px solid var(--gray-200); padding-top: 8px; }
+.deals-panel.open { display: block; }
+.deals-panel-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--gray-400); margin-bottom: 6px; }
+.deal-item { padding: 5px 0; border-bottom: 1px solid var(--gray-100); font-size: 11px; line-height: 1.4; }
+.deal-item:last-child { border-bottom: none; }
+.deal-item-title { font-weight: 600; color: var(--gray-800); }
+.deal-item-meta { color: var(--gray-600); margin-top: 2px; }
+.deal-badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-right: 3px; }
+.deal-badge-rights  { background: #fef2f2; color: #dc2626; }
+.deal-badge-mfg     { background: #eff6ff; color: #2563eb; }
+.deal-badge-collab  { background: #f0fdf4; color: #16a34a; }
+.deal-badge-option  { background: #fdf4ff; color: #7c3aed; }
+.deal-badge-other   { background: var(--gray-100); color: var(--gray-600); }
+
+/* ── Qualifying / All-Excluded badges ───────────────────────── */
+.qualifying-badge {
+  position: absolute; top: 7px; right: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #dcfce7; color: #16a34a; border: 2px solid #86efac;
+  font-size: 13px; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  pointer-events: none;
+}
+.all-excluded-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fef2f2; color: #dc2626; border: 1.5px solid #fca5a5;
+  font-size: 12px; font-weight: 700; line-height: 1;
+  margin-right: 5px; vertical-align: middle; flex-shrink: 0;
+}
+.all-excluded-heading {
+  font-size: 15px; font-weight: 700; color: #dc2626;
+  margin: 28px 0 10px;
+}
 
 .no-flags { color: var(--gray-400); font-size: 12px; }
 

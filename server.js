@@ -5,6 +5,11 @@ const Anthropic  = require('@anthropic-ai/sdk');
 const axios      = require('axios');
 const cheerio    = require('cheerio');
 const { Pool }  = require('pg');
+const sql        = require('mssql');
+const fs         = require('fs');
+const path       = require('path');
+let DefaultAzureCredential = null;
+try { ({ DefaultAzureCredential } = require('@azure/identity')); } catch (_) {}
 require('dotenv').config();
 
 // Dev DB doesn't support SSL; prod (Replit deployment) requires it
@@ -56,20 +61,16 @@ pool.query(`
 
 /**
  * For a single asset, determine whether it screens in or out and which
- * layer caused the exclusion. Checks layers 1-4 (from Claude) then
- * layer5 (direct-competitor, computed from BEONE_PIPELINE).
+ * layer caused the exclusion.
+ * Layer order: 1=oncology, 2=modality, 3=comp overlap, 4=rights, 5=manufacturing.
  */
 function assetScreenDecision(asset) {
-  for (const layer of ['layer1', 'layer2', 'layer3', 'layer4']) {
+  for (const layer of ['layer1', 'layer2', 'layer3', 'layer4', 'layer5']) {
     if (asset[layer] && asset[layer].status === 'fail') {
       return { decision: 'screen_out', layer, reason: asset[layer].reason || '' };
     }
   }
-  if (asset.layer5 && asset.layer5.status === 'fail') {
-    return { decision: 'screen_out', layer: 'layer5', reason: asset.layer5.reason || '' };
-  }
   if (asset.overallStatus === 'excluded') {
-    // Catch-all: Claude marked it excluded but no individual layer logged a fail
     return { decision: 'screen_out', layer: null, reason: '' };
   }
   return { decision: 'screen_in', layer: null, reason: '' };
@@ -256,60 +257,66 @@ const DELTA_TOOLS = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-// Pharmcube primary track tools — drugBaseLiteCN + drugDeal + web tools for Step 4
+// Citeline primary track tools — Steps 1+2 come from SQL; Steps 4+5 use OneBD
 // ─────────────────────────────────────────────────────────────
 
-const PHARMCUBE_TOOLS = [
-  { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
-  TOOLS.find(t => t.name === 'fetch_webpage'),
+const CITELINE_TOOLS = [
   {
-    name: 'drugBaseLiteCN',
-    description: [
-      'Search Pharmcube pharmaceutical database for a company\'s pipeline assets (lite/low-cost version — 15 pts per record vs 90 pts).',
-      'IMPORTANT: Pharmcube charges per record returned. Always pass drugType2=["生物"], diseaseArea="肿瘤领域", status=["Active","Unknown"] to pre-filter and avoid paying for irrelevant records.',
-      'Returns all core fields needed for Steps 1+2 screening:',
-      '  drug_type_2: "生物" = Biologic, "化药" = Small molecule',
-      '  drug_type_3 / modality: "抗体" = mAb, "双特异性抗体" = bsAb, "抗体偶联药物" = ADC,',
-      '    "单域抗体" = VHH/nanobody (EXCLUDED), "mRNA疗法" = mRNA/LNP (EXCLUDED),',
-      '    "抗体融合蛋白" = Fc-fusion, "T细胞衔接器" = TCE, "NK细胞衔接器" = NKCE',
-      '  disease_area: "肿瘤领域" = oncology/tumor',
-      '  latest_phase: development phase',
-      '  status: Active (progress within 3yr), Unknown (3-6yr), Inactive (>6yr/abandoned)',
-      'Use companyName to look up by company. Returns all assets across all phases.',
-      'Always pass pageNo (0-indexed) and pageSize (use 20).',
-    ].join('\n'),
+    name: 'fetch_webpage',
+    description: 'Fetch and read the text content of a specific webpage URL — use for the company pipeline/about page when thin-coverage enrichment is needed.',
     input_schema: {
       type: 'object',
       properties: {
-        companyName: { type: 'string', description: 'Company name to search (English or Chinese accepted)' },
-        pageNo: { type: 'number', description: 'Page number, 0-indexed (use 0 for first page)' },
-        pageSize: { type: 'number', description: 'Results per page. Use 20 for page 0, then 10 for page 1 if totalCount > 20. Never paginate past page 1.', enum: [1, 5, 10, 20, 50] },
-        drugType2: { type: 'array', items: { type: 'string' }, description: 'Filter by drug category. ALWAYS pass ["生物"] to return only biologics and avoid charges for small molecules.' },
-        diseaseArea: { type: 'string', description: 'Filter by disease area. ALWAYS pass "肿瘤领域" to return only oncology assets and avoid charges for non-oncology.' },
-        status: { type: 'array', items: { type: 'string' }, description: 'Filter by development status. ALWAYS pass ["Active","Unknown"] to exclude Inactive (abandoned) assets.' },
+        url: { type: 'string', description: 'Full URL to fetch' },
       },
-      required: ['companyName', 'pageNo', 'pageSize'],
+      required: ['url'],
     },
   },
   {
-    name: 'drugDeal',
+    name: 'onebd_resolve_company',
     description: [
-      'Search Pharmcube for licensing and partnership deals.',
-      'Use transferor to find deals where a company out-licensed an asset.',
-      'Returns: deal type, asset name, partner (transferee), rights scope (geography), date.',
-      'Rights scope "Global" or "US" = out-licensed, exclude that asset.',
-      'Rights scope "ex-US" or "China" = US rights retained, asset passes.',
-      'Collaboration / co-development with rights retained = asset passes.',
+      'Resolve a company name to an OneBD Cortellis company record.',
+      'Call this ONCE before onebd_get_deals — it returns the company_id needed for deal lookup.',
+      'If the company is not found, treat as "no Cortellis deal history" and proceed to Step 5 with no deals.',
     ].join('\n'),
     input_schema: {
       type: 'object',
       properties: {
-        transferor: { type: 'string', description: 'Company that out-licensed (licensor)' },
-        drugName: { type: 'string', description: 'Specific drug/asset name (optional)' },
-        dateFrom: { type: 'string', description: 'Search from this date YYYY-MM-DD (use "2010-01-01" for all-time)' },
-        dateTo: { type: 'string', description: 'Search until this date YYYY-MM-DD (optional)' },
+        companyName: { type: 'string', description: 'Company name to look up (English)' },
       },
-      required: ['transferor'],
+      required: ['companyName'],
+    },
+  },
+  {
+    name: 'onebd_get_deals',
+    description: [
+      'Fetch all Cortellis deals for a company from OneBD. Use the company_id returned by onebd_resolve_company.',
+      'Returns deals with title, date, summary, assets, territories, values, and parties.',
+      'Call this ONCE per company. Results are reused for both Step 4 (licensing) and Step 5 (manufacturing).',
+    ].join('\n'),
+    input_schema: {
+      type: 'object',
+      properties: {
+        companyId: { type: 'number', description: 'OneBD company_id (integer) returned by onebd_resolve_company' },
+      },
+      required: ['companyId'],
+    },
+  },
+  {
+    name: 'onebd_resolve_asset',
+    description: [
+      'Resolve a drug/asset name to an OneBD canonical asset record, returning an asset_id.',
+      'Call it for BOTH names (the deal asset name AND the Citeline asset name). If both return the same',
+      'asset_id, they are confirmed as the same molecule and the deal applies. If IDs differ, they are',
+      'different assets and the deal does NOT apply to that Citeline asset.',
+      'Only call this when a deal with licensing or manufacturing exclusion keywords is found.',
+    ].join('\n'),
+    input_schema: {
+      type: 'object',
+      properties: {
+        assetName: { type: 'string', description: 'Drug or asset name to resolve (code name, INN, or brand name)' },
+      },
+      required: ['assetName'],
     },
   },
 ];
@@ -361,7 +368,7 @@ function extractStoredUrls(storedResult) {
   // 3. Backward compat fallbacks for records predating allSourcesConsulted
   if (storedResult.website) add(storedResult.website, 'Company website');
   for (const a of (storedResult.assets || [])) {
-    for (const key of ['layer1', 'layer2', 'layer3', 'layer4']) {
+    for (const key of ['layer1', 'layer2', 'layer3', 'layer4', 'layer5']) {
       const src = (a[key] || {}).source;
       if (src) add(src, `${a.name || 'asset'} ${key} source`);
     }
@@ -405,7 +412,7 @@ Previous exclusion: ${exclusionSummary}
 URLS FROM THE ORIGINAL SCREEN — re-fetch these and look for changes since ${lastScreenDate}:
 ${urlList}
 
-YOUR TASK: Re-fetch each URL above (use fetch_webpage) and identify ONLY what has changed since ${lastScreenDate}. Do not run any web_search. Do not fetch any URL not listed above. Do not re-evaluate layers already assessed — just look for new pipeline entries, removed assets, or new Layer 3/4 disclosures.
+YOUR TASK: Re-fetch each URL above (use fetch_webpage) and identify ONLY what has changed since ${lastScreenDate}. Do not run any web_search. Do not fetch any URL not listed above. Do not re-evaluate layers already assessed — just look for new pipeline entries, removed assets, or new Layer 4/5 disclosures.
 
 BUDGET: up to ${Math.min(storedUrls.length + 1, 4)} fetch_webpage calls. Stop as soon as you have enough.
 
@@ -414,14 +421,14 @@ Return ONLY this JSON — no other text:
   "newAssets": [],
   "removedAssets": [],
   "layerChanges": {
-    "layer3": null,
-    "layer4": null
+    "layer4": null,
+    "layer5": null
   },
   "deltaNotes": "Plain-English summary of changes since ${lastScreenDate}. Write 'No material changes found' if nothing changed.",
   "scanDate": "${new Date().toISOString().slice(0, 10)}"
 }
 
-For newAssets, use the same schema as a full screening asset object (name, modality, targets, indication, phase, layer1-4 as inconclusive since not fully evaluated, overallStatus: "inconclusive", isPlatform: false, notes, flags: []).
+For newAssets, use the same schema as a full screening asset object (name, modality, targets, indication, phase, layer1-5 as inconclusive since not fully evaluated, overallStatus: "inconclusive", isPlatform: false, notes, flags: []).
 For layerChanges, each key is null or { "update": "one-sentence description", "source": "url" }.`,
   }];
 
@@ -480,8 +487,8 @@ function mergeWithDelta(storedResult, delta, lastScreenedAt) {
   // Surface layer changes prominently in researchNotes
   const lc = delta.layerChanges || {};
   const layerNotes = [
-    lc.layer3 ? `Layer 3 update: ${lc.layer3.update}${lc.layer3.source ? ' — ' + lc.layer3.source : ''}` : null,
     lc.layer4 ? `Layer 4 update: ${lc.layer4.update}${lc.layer4.source ? ' — ' + lc.layer4.source : ''}` : null,
+    lc.layer5 ? `Layer 5 update: ${lc.layer5.update}${lc.layer5.source ? ' — ' + lc.layer5.source : ''}` : null,
   ].filter(Boolean).join('\n');
 
   const deltaHeader = `[Recall track — last screen: ${lastScreenedAt.toISOString().slice(0,10)}, delta: ${result.deltaScanDate}]\n${result.deltaFindings}${layerNotes ? '\n' + layerNotes : ''}`;
@@ -557,9 +564,17 @@ Pass: has mAb/bsAb/tsAb/ADC/TCE/NKCE/Fc-fusion/Immunocytokine in CHO/mammalian e
 Fail: only excluded modalities → excludedAt: "layer2"
 Platform record: if site describes a general oncology biologic platform without named candidates, create one asset with isPlatform: true
 Note: a mixed-modality pipeline (mostly small molecules but with some ADCs/mAbs) still passes if any qualifying asset exists. A company is only excluded at Layer 2 if NONE of its assets qualify.
+
+PARTIAL CONTRIBUTOR EDGE CASE — screen out at Layer 2 any asset where the screened company does NOT manufacture the biologic drug substance (cell line / protein expression). This applies when:
+- The company provides only the small molecule component of a biologic (e.g. ADC payload/warhead provider — they supply the toxin, not the antibody)
+- The company provides only AI/computational drug discovery support for a biologic partnership (no wet lab, no cell line, no protein production)
+- The company provides only fill & finish / formulation / drug product (no drug substance / upstream bioreactor work)
+- The company is a clinical CRO, regulatory consultant, or platform licensor only
+Set layer2: fail, reason: "Company role is [X] only — does not manufacture biologic drug substance (cell line/protein expression)". Do NOT screen out co-developers who share manufacturing responsibilities or who have a manufacturing arm alongside their contribution.
+
 ENUMERATE ALL ASSETS — list every individually named asset from the pipeline page as a separate asset object regardless of phase. Discovery, Preclinical, Lead Opt, IND-Enabling, Phase 1/2/3, Approved — all are included. If the table has 10 rows, output 10 objects. Do NOT filter by phase, do NOT collapse the pipeline into one representative asset, do NOT summarize as "several mAbs". Extract all rows from what you already fetched — do not make extra tool calls per asset.
 
-LAYER 5 — Competitive Overlap (evaluate HERE, immediately after Layer 2, BEFORE Layers 3 and 4)
+LAYER 3 — Competitive Overlap (evaluate HERE, immediately after Layer 2, BEFORE Layers 4 and 5)
 Check each qualifying asset against the BeOne pipeline. Assets that are direct competitors are eliminated here so you do not waste research on their rights or manufacturing status.
 
 BEONE PIPELINE (modality + NCI-normalized targets):
@@ -581,18 +596,18 @@ Matching rules:
   All others — exact multiset rule: candidate's modality AND full target set must exactly match a BEONE_PIPELINE entry. Partial overlap (one shared target of several, or same targets but different modality) does NOT match.
 
 Per asset:
-  Match → layer5: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }, overallStatus: "excluded". Do NOT evaluate Layers 3+4 for this asset.
-  No match → layer5: { status: "pass", reason: "No competitive overlap with BeOne pipeline" }. Proceed to Layer 3.
-  Platform-level record (no target) → layer5: { status: "inconclusive", reason: "No target — not applicable" }. Proceed to Layer 3.
+  Match → layer3: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }, overallStatus: "excluded". Do NOT evaluate Layers 4+5 for this asset.
+  No match → layer3: { status: "pass", reason: "No competitive overlap with BeOne pipeline" }. Proceed to Layer 4.
+  Platform-level record (no target) → layer3: { status: "inconclusive", reason: "No target — not applicable" }. Proceed to Layer 4.
 
-LAYER 3 — Rights Retained
+LAYER 4 — Rights Retained
 Pass: company retains global or US rights for its qualifying assets
 Fail: global or US rights out-licensed via license deal, asset sale, or option
 Note: ex-US licensing only = still PASSES. A headline out-licensing deal for one asset does not mean all assets are out-licensed — if the company has other unlicensed qualifying assets, those still pass.
 
-LAYER 4 — US Manufacturing Screen
+LAYER 5 — US Manufacturing Screen
 Pass: no US drug substance manufacturing solution found for this asset
-Fail: has an active, asset-specific US CDMO relationship for drug substance manufacturing, OR owns a US biologics facility used for drug substance production → excludedAt: "layer4"
+Fail: has an active, asset-specific US CDMO relationship for drug substance manufacturing, OR owns a US biologics facility used for drug substance production → excludedAt: "layer5"
 
 RULE A — Drug substance only. BeOne's focus is drug substance (DS) manufacturing:
 bioreactor cell culture, upstream processing, fermentation, downstream processing, purification,
@@ -624,7 +639,7 @@ Thermo Fisher Biologics, Fujifilm Diosynth US, Catalent Biologics, Rentschler US
 Patheon (drug substance operations only — Patheon fill & finish does not count).
 Own US biologics facility (drug substance scale): excluded only if ≥200L bioreactor capacity
 confirmed. If capacity unstated → PASS, note in researchNotes.
-Default if ambiguous, budget exhausted, or time runs out: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Never return inconclusive on manufacturing alone — the company still qualifies. Only exclude if clearly disclosed.
+Default if ambiguous, budget exhausted, or time runs out: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Never return inconclusive on Layer 5 alone — the company still qualifies. Only exclude if clearly disclosed.
 
 RULES:
 - Return ONLY valid JSON at the end — no text before or after it
@@ -633,12 +648,12 @@ RULES:
   that description is not a complete response by itself — immediately continue in the SAME
   response with your next tool call or the final JSON. Stopping after only a description, with
   no tool call and no JSON, is invalid and wastes a full extra turn correcting it.
-- Assess Layer 5 (competitive overlap) immediately after Layer 2 — BEFORE Layers 3+4. Assets that fail Layer 5 skip Layers 3+4 entirely.
+- Assess Layer 3 (competitive overlap) immediately after Layer 2 — BEFORE Layers 4+5. Assets that fail Layer 3 skip Layers 4+5 entirely.
 - ENUMERATE ASSETS: list every individually named asset as its own object in "assets" regardless of phase (Discovery/Preclinical/Lead Opt/IND-Enabling/clinical/approved — all count). Never collapse, never filter by phase, never write "several mAbs". Read the pipeline page once and extract all rows; do not make extra tool calls per individual asset.
 - If after all searching you cannot find reliable information: status = "inconclusive", inconclusiveReason = "Website Input Needed"
 - Be specific in reasons — cite what you found (e.g. "Lonza US manufacturing agreement announced March 2024 per press release")
 - Whenever a specific page/filing/press release is the actual basis for a layer's pass/fail
-  (especially Layer 3 rights and Layer 4 manufacturing — the layers that actually drive
+  (especially Layer 4 rights and Layer 5 manufacturing — the layers that actually drive
   exclusions), put that exact URL in that layer's "source" field. If the company is excluded
   at the company level (excludedAt set), put the URL behind that reason in "excludedSource"
   too. Leave "source"/"excludedSource" empty if there genuinely isn't a single page it came
@@ -660,7 +675,7 @@ REQUIRED JSON OUTPUT:
   "type": "public" | "private" | "unknown",
   "website": "url or null",
   "status": "qualifying" | "excluded" | "inconclusive",
-  "excludedAt": null | "pre-filter" | "layer1" | "layer2" | "layer3" | "layer4",
+  "excludedAt": null | "pre-filter" | "layer1" | "layer2" | "layer4" | "layer5",
   "excludedReason": "",
   "excludedSource": "url or empty string — the specific page/filing/press release that is the basis for excludedReason, if there is one (leave empty for a Big Pharma pre-filter match, there's no source for that)",
   "inconclusiveReason": "",
@@ -674,13 +689,27 @@ REQUIRED JSON OUTPUT:
       "isPlatform": false,
       "layer1": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
       "layer2": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
-      "layer5": { "status": "pass|fail|inconclusive", "reason": "" },
-      "layer3": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
+      "layer3": { "status": "pass|fail|inconclusive", "reason": "" },
       "layer4": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
+      "layer5": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
       "overallStatus": "qualifying|excluded",
       "notes": "",
       "sources": [],
       "flags": []
+    }
+  ],
+  "deals": [
+    {
+      "title": "deal title from Cortellis",
+      "date": "YYYY-MM-DD or YYYY",
+      "partner": "counterparty company name",
+      "type": "licensing|manufacturing|collaboration|option|acquisition|other",
+      "territory": "Global|US|Ex-US|China|unspecified|...",
+      "scope": "all|modality-group|specific-asset|company-level",
+      "modalityGroup": "bsAb|TCE|ADC|mAb|Fc-fusion|tsAb or null",
+      "assetNames": ["named assets if scope=specific-asset, else empty array"],
+      "relevance": "rights|manufacturing|collaboration|equity|other",
+      "summary": "one-line deal summary"
     }
   ],
   "beoneAnalyzed": false,
@@ -693,7 +722,7 @@ REQUIRED JSON OUTPUT:
     {
       "url": "https://...",
       "label": "short descriptive name (e.g. '10-K 2024', 'Pipeline page', 'Press release Mar 2024')",
-      "usedFor": "which layer(s) or criteria this URL informed (e.g. 'Layer 1–2 modality/indication', 'Layer 4 manufacturing screen')",
+      "usedFor": "which layer(s) or criteria this URL informed (e.g. 'Layer 1–2 modality/indication', 'Layer 5 manufacturing screen')",
       "type": "filing | company-website | press-release | external"
     }
   ]
@@ -707,29 +736,30 @@ SOURCES ARRAY — populate "sources" at the company level with EVERY URL you act
 - Any third-party URL (news, databases, a CDMO's own site, etc.) → type "external"
 Do NOT include URLs you fetched but found completely empty/unreadable. Include every URL
 that contributed any information to your assessment. Populate "usedFor" with which layer(s)
-or pre-filter step the source supported (e.g. "Layer 1–2 oncology/modality", "Layer 4 manufacturing",
+or pre-filter step the source supported (e.g. "Layer 1–2 oncology/modality", "Layer 5 manufacturing",
 "Pre-filter: oncology confirmation", "Identification / website search").
 This field is REQUIRED — populate it for every company, even if the only source is the company website.
 
 FLAGS — Claude sets these automatically:
   "purple-flag" — set when externalSourcing is true (data from web_search/press/third-party
     rather than the company's own site).
-  "check-mfg-partner" — set when Layer 4 manufacturing is ambiguous, budget is exhausted
+  "check-mfg-partner" — set when Layer 5 manufacturing is ambiguous, budget is exhausted
     without a clear answer, or the screen could not confirm/deny a US manufacturing partner
     for at least one qualifying asset. Company still screens IN when this flag is set.
 indication-synergy, phase-synergy, checkpoint-io-alt, and masked-tce-4-1bb are auto-computed
 server-side from asset data after screening — do not set these yourself.
-adc-novel-payload still requires manual autoflag (payload detail not in Pharmcube).
+adc-novel-payload still requires manual autoflag (payload detail not in Citeline data).
 `.trim();
 
 // ─────────────────────────────────────────────────────────────
-// Pharmcube primary track system prompt
+// Base prompt — Steps 3+4+5 logic shared by all tracks.
+// CITELINE_PRIMARY_PROMPT slices from the Step 3 marker onward and prepends its own header.
 // ─────────────────────────────────────────────────────────────
 
 const PHARMCUBE_PRIMARY_PROMPT = `
 You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
-CONTEXT: PRIMARY TRACK — Pharmcube MCP. The company has already passed the Big Pharma pre-filter. You have access to Pharmcube (drugBaseLiteCN, drugDeal) plus web tools (web_search, fetch_webpage) for Step 5.
+CONTEXT: PRIMARY TRACK — Pharmcube MCP (Steps 1–3) + OneBD Cortellis deals (Steps 4–5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologics discovery) and Step 3 (competitive overlap) use Pharmcube drugBaseLiteCN. Steps 4 (licensing/rights) and 5 (manufacturing) use OneBD Cortellis deal data via onebd_resolve_company + onebd_get_deals.
 
 OBJECTIVE: Screen through Steps 1+2 → 3 → 4 → 5 in order. If the company is NOT FOUND in Pharmcube, return inconclusive immediately — do NOT search the web. The secondary research track will handle it.
 
@@ -832,7 +862,7 @@ MATCHING RULES:
     TCE / CD3 + PD-L1        → NO match (exact rule — not in pipeline)
 
 OUTCOMES per asset:
-  — Match → set layer5: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }
+  — Match → set layer3: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }
     set overallStatus: "excluded". Do NOT run Steps 4+5 for this asset.
   — No match → asset continues to Step 4
   — Platform-level record (no target) → Step 3 not applicable, asset continues to Step 4
@@ -840,61 +870,162 @@ OUTCOMES per asset:
 If ALL qualifying assets are eliminated here → excludedAt="step3", status="excluded"
 If ≥1 asset passes → proceed to Step 4 with passing assets only
 
-═══ STEP 4 — Rights Retained (call drugDeal for non-competing assets) ═══
+═══ STEPS 4 + 5 — Licensing & Manufacturing Check (OneBD Cortellis deals) ═══
 
-Call drugDeal with transferor = company name, dateFrom = "2010-01-01".
+MANDATORY CALL SEQUENCE:
+1. onebd_resolve_company(companyName) → company_id
+   — If not found: no Cortellis history. All passing assets pass both Steps 4 and 5. Output deals:[] and go straight to JSON.
+2. ★ YOU MUST call onebd_get_deals(company_id) immediately after resolve returns found:true.
+   ★ NEVER produce JSON output before calling onebd_get_deals. This call is not optional.
+   — Returns all company-level Cortellis deals with title, date, summary, assets[], territories[], values[], parties[].
 
-Per asset still passing after Step 3:
-  — Global or US rights out-licensed → exclude that asset (note partner + date)
-  — Ex-US rights only (China-only, APAC-only, etc.) → asset PASSES (US rights retained)
-  — Collaboration / co-development with rights retained → asset PASSES (note deal)
-  — No deal found → asset PASSES
+DEALS ARRAY — populate deals[] in the JSON output with EVERY deal related to cancer biologics:
+  Include: licensing deals, manufacturing/CDMO agreements, collaborations, options, co-development, acquisitions
+    that involve oncology assets or biologic programs.
+  Exclude: purely financial deals (debt, equity raises with no asset component), non-oncology deals,
+    non-biologic small molecule deals.
+  Set scope to:
+    "specific-asset"  — deal names one or more individual assets/compounds by name → set assetNames[]
+    "modality-group"  — deal covers a program type (e.g. "bsAb program", "ADC franchise") → set modalityGroup
+    "all"             — deal covers entire pipeline or all biologics
+    "company-level"   — collaboration, equity, platform deal with no specific asset or modality scope
+  ALL cancer biologic deals go into deals[] regardless of whether they cause asset exclusion.
 
-If ALL remaining assets excluded here → excludedAt="step4"
-If ≥1 passes → proceed to Step 5
+ASSET MATCHING — only needed for deals that scope to a specific asset or modality group:
 
-═══ STEP 5 — US Manufacturing Screen ═══
+  Step A — for deals where scope = "modality-group" OR deal.assets[] is EMPTY:
+  Check the title and summary for a modality or program-category description using the keyword
+  mapping below. Apply the deal to ALL qualifying assets of the matching modality type.
+  No tool call needed. For Step 5 manufacturing deals: set layer5: fail for every asset of that
+  modality type (e.g. "bsAb mfg partner" → layer5: fail on ALL bsAb assets in the pipeline).
 
-Applies to all companies (public and private) — use the same escalation regardless of listing status.
-Target: complete Step 5 in ≤90 seconds. Stop immediately once you have a conclusive answer.
-Budget: max 5 tool calls for this step.
+  Step B — for deals where scope = "specific-asset" and deal.assets[] lists named compounds:
+  Match using the asset's drugId, primary name, AND altNames (synonym list from Citeline).
+  For each name in deal.assets[]:
+    1. Check against asset.name and every entry in asset.altNames (brand names, INNs, research codes).
+       If ANY altName matches the deal asset name (case-insensitive) → confirmed match → apply deal.
+    2. Only if altName matching is genuinely ambiguous (multiple assets could match, or the deal uses
+       an unfamiliar code name not in altNames): call onebd_resolve_asset(dealAssetName) and
+       onebd_resolve_asset(assetPrimaryName) to confirm by ID.
+    3. If IDs match → confirmed same molecule → apply deal.
+    4. If IDs differ → different assets → deal does NOT apply.
+  Prefer altName matching over tool calls — it covers most cases and saves iterations.
 
-Escalation order (stop as soon as a clear answer is found):
+  Keyword → scope mapping:
 
-  5a — Company newsroom / press releases page (1 fetch):
-       Fetch /news, /press, /media, or /newsroom. Scan headlines for manufacturing deal announcements.
+  "fusion program(s)" / "fusion protein(s)" / "bi- and multi-functional fusion" / "Fc-fusion" /
+  "multi-functional fusion" / "ADAPTIR" / "DVD-Ig" / "fusion bispecific":
+    → Applies to: Fc-fusion assets ONLY + bispecific/trispecific assets that use a fusion-protein
+      format (Fc-fusion scaffold, heterodimeric fusion, ADAPTIR-type, etc.).
+    → Does NOT apply to: standard bispecific IgG formats (CrossMab, DuoBody, BiTE, DART,
+      knobs-into-holes IgG) that are not fusion proteins.
+    → WHEN IN DOUBT about whether a bsAb/tsAb uses a fusion format: APPLY the deal to it.
+      Err toward including more assets in the deal scope rather than excluding them — the user
+      can review; a missed disqualifying deal is worse than a false flag.
 
-  5b — Targeted CDMO search + fetch (1 search + 1 fetch):
-       web_search: "[company name]" (Lonza OR "WuXi Biologics" OR "Samsung Biologics" OR
-       "Thermo Fisher" OR "Catalent" OR "Fujifilm Diosynth" OR "AGC Biologics" OR Rentschler) manufacturing
-       Fetch the top result if it looks relevant.
+  "bispecific program(s)" / "bispecific antibody program(s)" (without "fusion"):
+    → Applies to all bsAb assets. Does NOT automatically cover Fc-fusion or tsAb unless specified.
 
-  5c — General US manufacturing search + fetch (1 search + 1 fetch):
-       web_search: "[company name]" biologics manufacturing CDMO "United States" OR "US facility" OR "US plant"
-       Fetch the top result if it looks relevant.
+  "trispecific program(s)" / "multispecific program(s)" (without "fusion"):
+    → Applies to all tsAb and bsAb assets.
 
-Manufacturing keywords (US drug substance):
-  CDMO, CMO, contract manufacturing, manufacturing agreement, supply agreement, tech transfer,
-  bioreactor, Lonza, Samsung Biologics, WuXi Biologics, Thermo Fisher Biologics,
-  Fujifilm Diosynth, AGC Biologics, Catalent Biologics, Rentschler, Patheon
-US-specific: US manufacturing, US facility, US plant, domestic manufacturing, Hopewell
+  "bi- and trispecific" / "bi- and multi-specific" (without "fusion"):
+    → Applies to all bsAb and tsAb assets, NOT to pure Fc-fusion assets.
 
-ASSET-LEVEL SCOPE: A manufacturing relationship covers only the specific asset it names. If one
-asset has a confirmed US CDMO and another does not, the second asset still passes. Only set
-excludedAt: "step5" at the company level if EVERY qualifying asset has a confirmed US manufacturing
-partner. If even one asset is unresolved or clear, the company screens in for that asset.
+  CRITICAL PARSING RULE — "bispecific ADCs" / "trispecific ADCs" / "bi- and trispecific ADCs" /
+  "bispecific and trispecific ADCs" / "[format] ADCs":
+    → The format qualifier (bi-, tri-, multispecific) MODIFIES ADC — it means ADCs of that format.
+    → Applies ONLY to ADC assets that are bispecific or trispecific. Does NOT apply to plain bsAbs
+       or tsAbs that carry no ADC payload.
+    → Example: "bsAb and trispecific ADCs" = bispecific ADCs + trispecific ADCs. A plain bsAb
+       without ADC payload is NOT covered. A bsAb-ADC IS covered.
 
-OUTCOMES per asset:
-  — US-based CDMO for drug substance confirmed → layer4: fail, overallStatus: excluded (note partner + URL)
-  — Own US biologics facility ≥200L confirmed → layer4: fail, overallStatus: excluded
-  — Own US facility, capacity unstated → layer4: pass, note in researchNotes
-  — Fill & finish / drug product only → layer4: pass
-  — Ex-US manufacturing only → layer4: pass
-  — No manufacturing disclosure found → layer4: pass (manufacturing gap confirmed)
-  — Ambiguous / Step 5 budget or time exhausted without clear answer → layer4: pass, add "check-mfg-partner"
-    to the company-level flags[] array. Never return inconclusive due to Step 5 alone — the company still qualifies.
+  "ADC program(s)" / "antibody-drug conjugate portfolio" (without format qualifier):
+    → Applies to all ADC assets regardless of format (mono, bi, tri).
 
-SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with usedFor: "Step 5 manufacturing".
+  "antibody program(s)" / "mAb portfolio" / "monoclonal antibody program(s)":
+    → Applies to all mAb assets.
+
+  "TCE program(s)" / "T-cell engager program(s)":
+    → Applies to all TCE assets.
+
+  "entire pipeline" / "all programs" / "all assets" / "all biologics":
+    → Applies to every qualifying asset.
+
+  If the title/summary contains NO modality or program-category language → true company-level deal
+  (equity, platform technology, general collaboration). Record as "company-level deal (no specific
+  asset): [title]" in researchNotes and do NOT apply to any individual asset.
+
+ASSESS STEPS 4 AND 5 SIMULTANEOUSLY for each qualifying asset using the same deal batch:
+
+Step 4 — Licensing/Rights (per asset still passing after Step 3):
+  Use ONLY these explicit rights-transfer keywords: out-licens, exclusive license, grant license,
+  license rights, sublicens, royalt, assign rights, transfer rights, commercialization rights.
+  Also check the deal's transaction_type and agreement_type fields directly — these are structured
+  Cortellis fields and are more reliable than keyword matching on title/summary.
+  Do NOT trigger on: collaboration, partnership, co-develop, co-promotion — these typically mean both
+  parties retain rights and are not exclusion events.
+
+  — transaction_type contains "Option" OR "License Option" OR agreement_type contains "Option" →
+    layer3: fail, excluded regardless of territory.
+    Note in asset notes: "License option granted — asset encumbered. Partner: [name], Date: [date]"
+  — Deal with explicit rights-transfer language, territory = Global or US → layer3: fail, excluded (note partner + date)
+  — Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) → layer3: pass
+  — Deal with explicit rights-transfer language, territory unspecified or empty → layer3: fail, excluded
+    Note in asset notes: "Out-licensed — no territory disclosed, assumed global. Partner: [name], Date: [date]"
+  — Collaboration / co-development with no rights-transfer language → layer3: pass (note deal in researchNotes)
+  — No matching rights-transfer deal → layer3: pass
+
+Step 5 — US Manufacturing (per asset still passing Step 4):
+  Keywords: manufactur, cdmo, cmo, contract manufactur, supply agreement, tech transfer, bioreactor,
+            lonza, wuxi biolog, samsung biolog, thermo fisher, catalent, fujifilm, agc biolog, rentschler, patheon
+
+  When territories[] is empty, infer US presence from the CDMO entity name in companies[]:
+    Look at the name of the manufacturing party (the CDMO / non-screened-company party).
+    Entity names carry geographic identifiers — read them literally:
+
+    Entity name implies a SPECIFIC NON-US location → no US capacity from this entity → layer4: PASS:
+      "(Shanghai)", "(Suzhou)", "(Wuxi)", "(Beijing)", any "(China)" city, "Co Ltd" Chinese suffix,
+      "(Korea)", "(Seoul)", "(Ireland)" alone without US partner, "(Germany)", "(Switzerland)" alone,
+      "(Japan)", "(Singapore)", "(India)"
+      Example: "WuXi Biologics (Shanghai) Co Ltd" → Shanghai entity → non-US → PASS
+
+    Entity name implies a GLOBAL CDMO or US presence → has or may have US drug-substance capacity → layer4: FAIL:
+      No geographic qualifier or qualifier includes "Global", "Inc" (US corporate suffix), "(USA)",
+      "(US)", "North America", "United States", or is a well-known global CDMO with US sites:
+      Lonza, WuXi Biologics (global CDMO regardless of which subsidiary entity), Fujifilm Diosynth,
+      AGC Biologics, Thermo Fisher, Catalent, Patheon, Boehringer Ingelheim Biopharmaceuticals,
+      Samsung Biologics
+      Example: "Lonza AG" → global CDMO with US sites → FAIL
+
+    Truly ambiguous (cannot tell from entity name) → layer4: PASS + add "check-mfg-partner" to flags[]
+
+  Per asset:
+  — Manufacturing deal, territory explicitly includes Global or US → layer4: fail, excluded (note CDMO entity + date)
+  — Manufacturing deal, territory explicitly non-US (China, Asia, Europe) → layer4: pass
+  — Manufacturing deal, territory unspecified, CDMO entity = specific non-US location → layer4: pass
+  — Manufacturing deal, territory unspecified, CDMO entity = global or US-capable → layer4: fail, excluded (note CDMO entity + date)
+  — Manufacturing deal, territory unspecified, CDMO entity truly ambiguous → layer4: pass + add "check-mfg-partner" to flags[]
+  — No matching manufacturing deal → layer4: pass (manufacturing gap confirmed)
+  Always note the CDMO entity name, deal date, and outcome in the asset's notes field.
+
+DEAL NOTES — MANDATORY for every asset that reaches Steps 4+5:
+  Populate each asset's "notes" field referencing any deals[] entries that apply to that asset
+  (matched via specific-asset ID confirmation OR modality-group keyword OR scope=all).
+  Format each matched deal as one line:
+    "[date] [title] | [licensing/manufacturing/collaboration] | Territory: [territory or 'unspecified'] | [outcome reason]"
+  Examples:
+    "2025-07-01 Henlius to develop and commercialize HCB-101 | licensing | Territory: ex-US (China, SE Asia, MENA) | US rights retained — pass"
+    "2026-01-26 WuXi Biologics (Shanghai) — end-to-end manufacturing for fusion programs | manufacturing | Territory: unspecified (WuXi = global CDMO with US capacity) | screened out"
+    "2024-03-15 Lonza biologics supply agreement | manufacturing | Territory: unspecified (Lonza = global CDMO with US capacity) | screened out"
+  If no deals[] entries match this asset, write "No Cortellis deals matched to this asset".
+  Do NOT leave notes blank for any asset that went through Steps 4+5.
+
+If ALL remaining assets excluded at Step 4 → excludedAt="step4"
+If ALL remaining assets excluded at Step 5 → excludedAt="step5"
+Never return inconclusive due to Step 5 alone — if any asset still passes, company qualifies.
+
+SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 — licensing and manufacturing deals".
 
 ═══ RULES ═══
 
@@ -903,10 +1034,14 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
     Example: 14 assets screened out + 1 asset passes Step 5 → company QUALIFIES on that asset.
     Never set status="excluded" while any single asset still has overallStatus="qualifying".
 
-  — Always call drugBaseLiteCN BEFORE any web tool
+  — Always call drugBaseLiteCN BEFORE any OneBD tool
   — drugBaseLiteCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
-  — If still not found after retry: return inconclusive immediately, no web search
-  — Run Step 3 (competitive overlap) BEFORE calling drugDeal — it's free and eliminates assets
+  — If still not found after retry: return inconclusive immediately
+  — Run Step 3 (competitive overlap) BEFORE calling OneBD — it's free and eliminates assets early
+  — onebd_resolve_company: call ONCE per company
+  — onebd_get_deals: MANDATORY immediately after resolve returns found:true — call ONCE, never skip
+  — Steps 4 and 5 both use the SAME deal batch from onebd_get_deals — no additional OneBD calls
+  — Match deals to Pharmcube assets by name (fuzzy) — no asset-level OneBD resolution needed
   — Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
   — Use NCI-standard target names: PD-1 (not PD1), HER2 (not ERBB2), EGFR, CD3, CD19, etc.
   — Return ONLY valid JSON at end — no text before or after it
@@ -933,14 +1068,28 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
       "phase": "Discovery|Lead Opt|Preclinical|IND-Enabling|Phase 1|Phase 2|Phase 3|Approved|Unknown",
       "status": "Active|Unknown|Inactive",
       "isPlatform": false,
-      "layer1": { "status": "pass|fail|inconclusive", "reason": "oncology indication confirmed via Pharmcube" },
+      "layer1": { "status": "pass|fail|inconclusive", "reason": "oncology indication confirmed via Citeline" },
       "layer2": { "status": "pass|fail|inconclusive", "reason": "modality: [English modality term]" },
-      "layer5": { "status": "pass|fail|inconclusive", "reason": "competitive overlap check (Step 3)" },
-      "layer3": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
+      "layer3": { "status": "pass|fail|inconclusive", "reason": "competitive overlap check (Step 3)" },
       "layer4": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
+      "layer5": { "status": "pass|fail|inconclusive", "reason": "", "source": "" },
       "overallStatus": "qualifying|excluded",
       "notes": "",
       "flags": []
+    }
+  ],
+  "deals": [
+    {
+      "title": "deal title from Cortellis",
+      "date": "YYYY-MM-DD or YYYY",
+      "partner": "counterparty company name",
+      "type": "licensing|manufacturing|collaboration|option|acquisition|other",
+      "territory": "Global|US|Ex-US|China|unspecified|...",
+      "scope": "all|modality-group|specific-asset|company-level",
+      "modalityGroup": "bsAb|TCE|ADC|mAb|Fc-fusion|tsAb or null",
+      "assetNames": ["named assets if scope=specific-asset, else empty array"],
+      "relevance": "rights|manufacturing|collaboration|equity|other",
+      "summary": "one-line deal summary"
     }
   ],
   "beoneAnalyzed": false,
@@ -960,11 +1109,35 @@ SOURCING: Add every URL consulted in Step 5 to the top-level sources[] with used
 }
 
 Notes on the asset schema:
-  layer5 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer5.status = "inconclusive", reason = "No target — not applicable".
-  layer3 = Step 4 rights check. Only fill for assets that passed Step 3 (not competed out). For assets eliminated at Step 3, leave layer3/layer4 as null or omit.
-  layer4 = Step 5 manufacturing check. Only fill for assets that passed Steps 3+4.
-  For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" and "pharmcube:drugDeal" as url placeholders.
+  layer3 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer3.status = "inconclusive", reason = "No target — not applicable".
+  layer4 = Step 4 rights check. Only fill for assets that passed Step 3 (not competed out). For assets eliminated at Step 3, leave layer4/layer5 as null or omit.
+  layer5 = Step 5 manufacturing check. Only fill for assets that passed Steps 3+4.
+  For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" as url placeholder.
+  For OneBD calls in sources[], use "onebd:cortellis-deals" as url placeholder.
 `.trim();
+
+// Derived from PHARMCUBE_PRIMARY_PROMPT — identical Steps 3+4+5 logic, header replaced.
+// Steps 1+2 data is pre-loaded from Citeline SQL and passed in the user message.
+const CITELINE_PRIMARY_PROMPT = (() => {
+  const step3Marker = '═══ STEP 3 — COMPETITIVE OVERLAP';
+  const idx = PHARMCUBE_PRIMARY_PROMPT.indexOf(step3Marker);
+  const body = idx !== -1 ? PHARMCUBE_PRIMARY_PROMPT.slice(idx) : PHARMCUBE_PRIMARY_PROMPT;
+  return (
+    `You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
+
+CONTEXT: PRIMARY TRACK — Citeline database (Steps 1+2 pre-loaded) + OneBD Cortellis deals (Steps 4+5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologic identification) are DONE — the qualifying assets are already in the user message.
+
+OBJECTIVE: Use the Citeline asset list provided. Do NOT call any pipeline lookup tool. Start immediately at STEP 3 (competitive overlap), then STEPS 4+5 via onebd_resolve_company and onebd_get_deals.
+
+${body}`
+  )
+    .replace('"sourceTrack": "pharmcube"', '"sourceTrack": "citeline"')
+    .replace(
+      'For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" as url placeholder.',
+      'Steps 1+2 source: Citeline SQL (use "citeline:sql" as url placeholder in sources[]).',
+    )
+    .trim();
+})();
 
 // ─────────────────────────────────────────────────────────────
 // Tool implementations
@@ -1031,6 +1204,77 @@ async function fetchWebpage(url, section) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Pipeline page discovery — used for thin-coverage enrichment.
+// Fetches the homepage, scores same-domain links by pipeline keywords,
+// then fetches the best-matching subpage. Returns { url, content } or null.
+// ─────────────────────────────────────────────────────────────
+
+const PIPELINE_LINK_SCORES = [
+  { re: /\/pipeline/i,    score: 10 },
+  { re: /\/science/i,     score:  8 },
+  { re: /\/programs/i,    score:  7 },
+  { re: /\/research/i,    score:  6 },
+  { re: /\/therapeutic/i, score:  5 },
+  { re: /\/oncology/i,    score:  5 },
+  { re: /\/portfolio/i,   score:  4 },
+  { re: /\/drug/i,        score:  3 },
+  { re: /\/product/i,     score:  3 },
+];
+
+async function findAndFetchPipelinePage(websiteUrl) {
+  try {
+    // Homepage fetch — 6s budget leaves room for subpage fetch within 15s total
+    const res = await axios.get(websiteUrl, {
+      timeout: 6000, maxRedirects: 4,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', Accept: 'text/html,*/*' },
+      validateStatus: s => s < 400,
+    });
+    if (typeof res.data !== 'string') return null;
+
+    const $        = cheerio.load(res.data);
+    const baseHost = new URL(websiteUrl).hostname;
+    const seen     = new Set();
+    const ranked   = [];
+
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const text = $(el).text().trim();
+      if (!href || href.startsWith('#') || href.startsWith('mailto:')) return;
+      try {
+        const full = new URL(href, websiteUrl).href;
+        if (new URL(full).hostname !== baseHost) return;
+        if (seen.has(full)) return;
+        seen.add(full);
+        let score = 0;
+        for (const { re, score: s } of PIPELINE_LINK_SCORES) {
+          if (re.test(href)) score += s;
+          if (re.test(text)) score += s * 0.5;
+        }
+        if (score > 0) ranked.push({ url: full, score });
+      } catch {}
+    });
+
+    ranked.sort((a, b) => b.score - a.score);
+    if (!ranked.length) return null;
+
+    // Subpage fetch — 8s budget (6 + 8 = 14s max, comfortably under 15s wall)
+    const best = ranked[0].url;
+    const res2 = await axios.get(best, {
+      timeout: 8000, maxRedirects: 4,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', Accept: 'text/html,*/*' },
+      validateStatus: s => s < 400,
+    });
+    if (typeof res2.data !== 'string') return null;
+    const $2      = cheerio.load(res2.data);
+    $2('script, style, nav, footer, header, iframe, [aria-hidden="true"]').remove();
+    const content = $2('body').text().replace(/\s+/g, ' ').trim().slice(0, 15000);
+    return { url: best, content };
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Evidence snapshot — captures what was actually read for audit trail
 // ─────────────────────────────────────────────────────────────
 
@@ -1047,72 +1291,6 @@ function makeEvidenceSnapshot(url, content, type = 'fetch') {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// Pharmcube MCP — direct JSON-RPC call to the Streamable HTTP endpoint
-// Called when Claude (in the primary track loop) invokes drugBaseLiteCN or drugDeal
-// ─────────────────────────────────────────────────────────────
-
-async function callPharmcubeTool(toolName, toolArgs) {
-  const apiKey = process.env.PHARMCUBE_API_KEY || process.env.pharmcube_api_key;
-  if (!apiKey) throw new Error('PHARMCUBE_API_KEY not set — primary track disabled');
-
-  const mcpToolName = `pharmcube-mcp-${toolName}`;
-
-  let rawBody;
-  try {
-    const resp = await axios.post(
-      'https://mcp-openapi.pharmcube.com/mcp',
-      {
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method: 'tools/call',
-        params: { name: mcpToolName, arguments: toolArgs },
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json, text/event-stream',
-        },
-        timeout: 30000,
-        responseType: 'text',
-      }
-    );
-    rawBody = resp.data;
-  } catch (e) {
-    return `Pharmcube network error calling ${toolName}: ${e.message}`;
-  }
-
-  // Parse JSON response (handles both direct JSON and SSE "data: {...}" streams)
-  const tryJson = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };
-
-  let data = tryJson(rawBody);
-  if (!data) {
-    // Try extracting from SSE stream lines
-    const events = (rawBody || '').split('\n')
-      .filter(l => l.startsWith('data: '))
-      .map(l => tryJson(l.slice(6)))
-      .filter(Boolean);
-    data = events.find(e => e.result || e.error) || events[0] || null;
-  }
-
-  if (!data) return `Pharmcube returned unparseable response for ${toolName}: ${String(rawBody).slice(0, 500)}`;
-
-  if (data.error) {
-    const err = data.error;
-    return `Pharmcube error ${err.code || ''}: ${err.message || JSON.stringify(err)}`;
-  }
-
-  if (data.result) {
-    const content = data.result.content;
-    if (Array.isArray(content)) {
-      return content.map(c => (typeof c === 'string' ? c : (c.text || JSON.stringify(c)))).join('\n');
-    }
-    return JSON.stringify(data.result, null, 2);
-  }
-
-  return JSON.stringify(data, null, 2);
-}
 
 // ─────────────────────────────────────────────────────────────
 // OneBD REST API helper
@@ -1195,6 +1373,455 @@ function oneBdCompanyDossier(companyId) {
 
 function oneBdAssetDossier(assetId) {
   return callOneBdApi(`/assets/${assetId}/dossier`);
+}
+
+// Tool-callable wrappers for Steps 4+5 (OneBD Cortellis)
+
+// Suffixes that carry no identity signal — strip these to get the core name
+const COMPANY_SUFFIX_RE = /\b(bio|biologics|biolog|biotherapeutics|biosciences|biopharma|therapeutics|pharma|pharmaceuticals|medicines|oncology|sciences|inc\.?|ltd\.?|llc\.?|corp\.?|co\.?|gmbh|ag|sa|plc|holdings|group)\b\.?$/gi;
+
+function companyNameVariants(name) {
+  const raw = name.trim();
+  const words = raw.split(/\s+/);
+
+  // Core name: strip trailing descriptor suffixes iteratively
+  let core = raw;
+  let prev;
+  do {
+    prev = core;
+    core = core.replace(COMPANY_SUFFIX_RE, '').trim();
+  } while (core !== prev && core.length > 0);
+  if (!core) core = words[0]; // safety: never go fully empty
+
+  const noSpaces = words.join('');              // "Hanchor Bio" → "HanchorBio"
+  const coreNoSpaces = core.split(/\s+/).join(''); // for multi-word cores
+
+  return [...new Set([raw, noSpaces, core, coreNoSpaces, words[0]])].filter(Boolean);
+}
+
+async function oneBdResolveCompanyForTool(companyName) {
+  const key = getOneBdKey();
+  const headers = { 'X-API-Key': key, 'Content-Type': 'application/json' };
+  const firstWord = companyName.trim().split(/\s+/)[0].toLowerCase();
+  const queries = companyNameVariants(companyName);
+
+  for (const query of queries) {
+    const res = await axios.post(`${ONEBD_BASE}/search`, {
+      query,
+      datasets: ['companies'],
+      limit_per_dataset: 5,
+    }, { headers, timeout: 20000 });
+
+    const hits = ((res.data.groups || []).find(g => g.dataset === 'companies')?.items) || [];
+    if (!hits.length) continue;
+
+    const match = hits.find(c => (c.name || '').toLowerCase().includes(firstWord)) || hits[0];
+    if (match) {
+      const usedQuery = query !== companyName ? ` (matched via "${query}")` : '';
+      console.log(`    [onebd_resolve_company] "${companyName}" → "${match.name}" (id=${match.id})${usedQuery}`);
+      return JSON.stringify({ found: true, id: match.id, name: match.name, company_type: match.company_type || null, deal_count: match.deal_count ?? null });
+    }
+  }
+
+  return JSON.stringify({ found: false, message: `"${companyName}" not found in OneBD (tried: ${queries.join(', ')})` });
+}
+
+async function oneBdGetDealsForTool(companyId) {
+  const key = getOneBdKey();
+  const res = await axios.post(`${ONEBD_BASE}/deals/search`, {
+    companies: { all: [{ id: companyId }] },
+    expand: ['assets', 'companies', 'territories', 'values'],
+    limit: 100,
+  }, { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 30000 });
+
+  const deals = res.data.items || [];
+  const formatted = formatDealsForTool(deals);
+  return JSON.stringify({ total: deals.length, deals: formatted });
+}
+
+async function oneBdResolveAssetForTool(assetName) {
+  const key = getOneBdKey();
+  const res = await axios.post(`${ONEBD_BASE}/search`, {
+    query: assetName,
+    datasets: ['assets'],
+    limit_per_dataset: 5,
+  }, { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 20000 });
+
+  const hits = ((res.data.groups || []).find(g => g.dataset === 'assets')?.items) || [];
+  const lower = assetName.toLowerCase();
+  const match = hits.find(a => (a.name_display || '').toLowerCase() === lower)
+             || hits.find(a => (a.name_display || '').toLowerCase().includes(lower.split(' ')[0]))
+             || hits[0] || null;
+  if (!match) return JSON.stringify({ found: false, message: `"${assetName}" not found in OneBD Cortellis assets` });
+  return JSON.stringify({ found: true, id: match.id, name_display: match.name_display, phase: match.phase_highest_now || match.phase_highest_start || null });
+}
+
+async function oneBdGetAssetDealsForTool(assetId, assetName) {
+  const key = getOneBdKey();
+  const res = await axios.post(`${ONEBD_BASE}/deals/search`, {
+    assets: { all: [{ id: assetId }] },
+    expand: ['assets', 'companies', 'territories', 'values'],
+    limit: 50,
+  }, { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 30000 });
+
+  const deals = res.data.items || [];
+  return JSON.stringify({ asset: assetName, asset_id: assetId, total: deals.length, deals: formatDealsForTool(deals) });
+}
+
+function formatDealsForTool(deals) {
+  return deals.map(d => ({
+    title: d.title,
+    date: d.date_start ? d.date_start.slice(0, 10) : null,
+    agreement_type: d.agreement_type || null,
+    transaction_type: d.transaction_type || null,
+    summary: (d.summary_excerpt || d.summary || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400),
+    assets: (d.assets || []).map(a => a.name_display || a.name || String(a.id)),
+    territories: (d.territories || []).map(t => t.name || t),
+    value: d.values?.length ? d.values.map(v => `${v.type} $${v.amount_usd_m}M`).join(', ') : null,
+    parties: (d.companies || []).map(c => ({ name: c.name, role: c.role })),
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Citeline SQL — Azure Synapse connection + Steps 1+2 query
+// ─────────────────────────────────────────────────────────────
+
+let _citelinePool = null;
+let _citelineTokenExpiry = 0;
+
+async function getCitelinePool() {
+  const now = Date.now();
+  if (_citelinePool && _citelineTokenExpiry > now + 5 * 60 * 1000) return _citelinePool;
+  if (_citelinePool) {
+    try { await _citelinePool.close(); } catch (_) {}
+    _citelinePool = null;
+  }
+  if (!DefaultAzureCredential) throw new Error('@azure/identity not installed');
+  const credential = new DefaultAzureCredential({ includeInteractiveCredentials: true });
+  const tokenResp = await credential.getToken('https://database.windows.net/');
+  _citelineTokenExpiry = tokenResp.expiresOnTimestamp;
+  _citelinePool = await sql.connect({
+    server: 'ea-bgne-synapse-dsoe.sql.azuresynapse.net',
+    database: 'BGNE_DSOE',
+    authentication: { type: 'azure-active-directory-access-token', options: { token: tokenResp.token } },
+    options: { encrypt: true, trustServerCertificate: false, enableArithAbort: true },
+    port: 1433, connectionTimeout: 30000, requestTimeout: 60000,
+  });
+  return _citelinePool;
+}
+
+const CITELINE_ASSETS_SQL = `
+WITH drug_company AS (
+  SELECT pp.drugId, pp.highestDevelopmentStatus, pp.globalStatus, pp.companyRelationship,
+    cp.companyWebsite,
+    ROW_NUMBER() OVER (
+      PARTITION BY pp.drugId
+      ORDER BY
+        CASE pp.companyRelationship WHEN 'Originator' THEN 1 ELSE 2 END,
+        CASE pp.highestDevelopmentStatus
+          WHEN 'Launched'                  THEN 1 WHEN 'Registered'               THEN 2
+          WHEN 'Pre-registration'          THEN 3 WHEN 'Phase III Clinical Trial'  THEN 4
+          WHEN 'Phase II Clinical Trial'   THEN 5 WHEN 'Phase I/II Clinical Trial' THEN 6
+          WHEN 'Phase I Clinical Trial'    THEN 7 WHEN 'Clinical Trial'            THEN 8
+          WHEN 'Preclinical'               THEN 9 ELSE 10
+        END
+    ) AS rn
+  FROM CITELINE.drugComp_panel cp
+  JOIN CITELINE.drugProg_panel pp ON pp.companyId = cp.companyId
+  WHERE (cp.companyName LIKE '%' + @company + '%' OR cp.parentCompanyName LIKE '%' + @company + '%')
+    AND pp.globalStatus NOT IN ('Discontinued','Withdrawn','Suspended')
+    AND (pp.highestDevelopmentStatus NOT IN ('Ceased','Discontinued','Withdrawn','Suspended')
+         OR pp.highestDevelopmentStatus IS NULL)
+),
+modality_ranked AS (
+  SELECT drugId, drugTypeCaption,
+    ROW_NUMBER() OVER (
+      PARTITION BY drugId ORDER BY
+        CASE drugTypeCaption
+          WHEN 'Antibody-drug conjugate'       THEN 1
+          WHEN 'Cell engager, bispecific'       THEN 2
+          WHEN 'Trispecific cell engager'       THEN 2
+          WHEN 'Cell engager, other'            THEN 2
+          WHEN 'Multispecific antibody'         THEN 3
+          WHEN 'Trispecific antibody'           THEN 4
+          WHEN 'Bispecific antibody'            THEN 5
+          WHEN 'Fusion protein'                 THEN 6
+          WHEN 'Human monoclonal antibody'      THEN 7
+          WHEN 'Humanized monoclonal antibody'  THEN 7
+          WHEN 'Chimaeric monoclonal antibody'  THEN 7
+          WHEN 'Murine monoclonal antibody'     THEN 7
+          WHEN 'Monoclonal antibody, other'     THEN 8
+          ELSE 9
+        END
+    ) AS rn
+  FROM CITELINE.drug_drugType
+  WHERE drugTypeCaption IN (
+    'Human monoclonal antibody','Humanized monoclonal antibody',
+    'Chimaeric monoclonal antibody','Murine monoclonal antibody','Monoclonal antibody, other',
+    'Bispecific antibody','Trispecific antibody','Antibody-drug conjugate',
+    'Cell engager, bispecific','Trispecific cell engager','Cell engager, other',
+    'Fusion protein','Multispecific antibody'
+  )
+),
+targets_agg AS (
+  SELECT drugId, STRING_AGG(directMechanism, '; ') AS targets
+  FROM CITELINE.drug_mechanismsOfAction
+  WHERE directMechanism NOT IN (
+    'Immune checkpoint inhibitor','Immuno-oncology therapy','Antineoplastic','Antitumour','Cytotoxic'
+  )
+  GROUP BY drugId
+),
+indications_agg AS (
+  SELECT drugId,
+    STRING_AGG(CAST(diseaseName AS NVARCHAR(MAX)), '; ') AS indications
+  FROM CITELINE.drug_indicationGroups
+  WHERE indicationGroups = 'Anticancer'
+  GROUP BY drugId
+)
+SELECT
+  dp.drugId, dp.drugPrimaryName AS drug, mr.drugTypeCaption AS citelineModality,
+  dc.highestDevelopmentStatus AS citelinePhase, dc.globalStatus AS status,
+  dc.companyRelationship, dc.companyWebsite,
+  ISNULL(ta.targets, '') AS targets,
+  ISNULL(ia.indications, '') AS indications
+FROM drug_company dc
+JOIN CITELINE.drug_panel dp ON dp.drugId = dc.drugId
+JOIN modality_ranked mr ON mr.drugId = dc.drugId AND mr.rn = 1
+LEFT JOIN targets_agg ta ON ta.drugId = dc.drugId
+JOIN indications_agg ia ON ia.drugId = dc.drugId
+WHERE dc.rn = 1
+ORDER BY dp.drugPrimaryName
+`;
+
+const CITELINE_MODALITY_MAP = {
+  'Antibody-drug conjugate':       'ADC',
+  'Cell engager, bispecific':      'TCE',
+  'Trispecific cell engager':      'TCE',
+  'Cell engager, other':           'TCE',
+  'Multispecific antibody':        'bsAb',
+  'Trispecific antibody':          'tsAb',
+  'Bispecific antibody':           'bsAb',
+  'Fusion protein':                'Fc-fusion',
+  'Human monoclonal antibody':     'mAb',
+  'Humanized monoclonal antibody': 'mAb',
+  'Chimaeric monoclonal antibody': 'mAb',
+  'Murine monoclonal antibody':    'mAb',
+  'Monoclonal antibody, other':    'mAb',
+};
+
+const MODALITY_PRIORITY = {
+  'Antibody-drug conjugate':       1,
+  'Cell engager, bispecific':      2,
+  'Trispecific cell engager':      2,
+  'Cell engager, other':           2,
+  'Multispecific antibody':        3,
+  'Trispecific antibody':          4,
+  'Bispecific antibody':           5,
+  'Fusion protein':                6,
+  'Human monoclonal antibody':     7,
+  'Humanized monoclonal antibody': 7,
+  'Chimaeric monoclonal antibody': 7,
+  'Murine monoclonal antibody':    7,
+  'Monoclonal antibody, other':    8,
+};
+
+const CITELINE_PHASE_MAP = {
+  'Launched':                  'Approved',
+  'Registered':                'Approved',
+  'Pre-registration':          'Pre-registration',
+  'Phase III Clinical Trial':  'Phase 3',
+  'Phase II Clinical Trial':   'Phase 2',
+  'Phase I/II Clinical Trial': 'Phase 1/2',
+  'Phase I Clinical Trial':    'Phase 1',
+  'Clinical Trial':            'Phase 1',
+  'Preclinical':               'Preclinical',
+  'No Development Reported':   'No Development Reported',
+};
+
+const CITELINE_MODALITY_CHECK_SQL = `
+SELECT DISTINCT cp.companyWebsite, dt.drugTypeCaption, dt.drugTypeHierarchy
+FROM CITELINE.drugComp_panel cp
+LEFT JOIN CITELINE.drugProg_panel pp ON pp.companyId = cp.companyId
+LEFT JOIN CITELINE.drug_drugType dt ON dt.drugId = pp.drugId
+WHERE (cp.companyName LIKE '%' + @company + '%' OR cp.parentCompanyName LIKE '%' + @company + '%')
+`;
+
+const QUALIFYING_BIOLOGIC_MODALITIES = new Set([
+  'Human monoclonal antibody','Humanized monoclonal antibody',
+  'Chimaeric monoclonal antibody','Murine monoclonal antibody','Monoclonal antibody, other',
+  'Bispecific antibody','Trispecific antibody','Antibody-drug conjugate',
+  'Cell engager, bispecific','Trispecific cell engager','Cell engager, other',
+  'Fusion protein','Multispecific antibody',
+]);
+
+// ─────────────────────────────────────────────────────────────
+// Citeline spreadsheet loader — file-based primary when SQL auth
+// is unavailable (BeiGene Conditional Access policy blocks direct
+// connection from unmanaged devices). Falls back to SQL if no file.
+// ─────────────────────────────────────────────────────────────
+
+const COMPANY_SUFFIXES = /[\s\-]*(therapeutics?|biosciences?|biotechnolog(?:y|ies)|biotech|biopharma|pharmaceuticals?|pharma|sciences?|biotherapeutics?|oncolog(?:y|ies)|medicines?|health(?:care)?|biologics?|bio|inc\.?|ltd\.?|llc\.?|co\.?|corp\.?|corporation|group|holdings?|labs?|laborator(?:y|ies)|partners?)\s*$/i;
+
+function stemCompany(name) {
+  // Split CamelCase so "HanchorBio" → "Hanchor Bio" → stem "hanchor"
+  let s = String(name || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().trim();
+  // Strip suffixes up to 3 passes ("Bio Sciences Inc" → "Bio Sciences" → "Bio" → "")
+  for (let i = 0; i < 3; i++) {
+    const prev = s;
+    s = s.replace(COMPANY_SUFFIXES, '').trim();
+    if (s === prev) break;
+  }
+  return s.replace(/[^a-z0-9]/g, ''); // remove spaces, hyphens, punctuation
+}
+
+let citelineIndex = null; // map: stemmedCompanyName → row[]
+
+function loadCitelineSpreadsheet() {
+  const candidates = [
+    path.join(__dirname, 'citeline-data', 'Citeline_Screener_Data.xlsx'),
+    path.join(__dirname, 'Citeline_Screener_Data.xlsx'),
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
+  ];
+  const filePath = candidates.find(p => fs.existsSync(p));
+  if (!filePath) {
+    console.log('[citeline] No spreadsheet found — will attempt SQL connection');
+    return;
+  }
+  console.log(`[citeline] Loading spreadsheet: ${path.basename(filePath)}`);
+  const XLSX = require('xlsx');
+  const wb   = XLSX.readFile(filePath);
+  const sheetName = wb.SheetNames.includes('Sheet2') ? 'Sheet2' : wb.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
+
+  citelineIndex = {};
+  for (const row of rows) {
+    const stem = stemCompany(row.companyName);
+    if (!stem || stem.length < 3) continue;
+    if (!citelineIndex[stem]) citelineIndex[stem] = [];
+    citelineIndex[stem].push(row);
+  }
+  console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineIndex).length} company stems`);
+}
+
+const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
+
+function citelineGetAssetsLocal(companyName) {
+  const needle = stemCompany(companyName);
+
+  if (!needle || needle.length < 3) {
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
+  }
+
+  // Stem match: "hanchor bio" = "hanchorbio" = "hanchor therapeutics" → all stem to "hanchor"
+  const matchedRows = [];
+  for (const [stem, rows] of Object.entries(citelineIndex)) {
+    if (stem === needle ||
+        (needle.length >= 4 && stem.length >= 4 && (stem.includes(needle) || needle.includes(stem)))) {
+      matchedRows.push(...rows);
+    }
+  }
+
+  if (matchedRows.length === 0) {
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
+  }
+
+  // Company-level URL fields — same across all rows for this company
+  const companyWebsite = matchedRows[0].companyWebsite || null;
+  const pipelineUrl    = matchedRows.find(r => r.pipelineUrl)?.pipelineUrl || null;
+
+  // Filter discontinued, regimens (combination "+" therapies), and qualifying modalities
+  const active     = matchedRows.filter(r =>
+    !EXCLUDED_STATUSES.has(r.globalStatus) &&
+    r.drugPrimaryName && !r.drugPrimaryName.includes('+')
+  );
+  const qualifying = active.filter(r => QUALIFYING_BIOLOGIC_MODALITIES.has(r.drugTypeCaption));
+
+  if (qualifying.length === 0) {
+    const allModalities = [...new Set(active.map(r => r.drugTypeCaption).filter(Boolean))];
+    const hasQualifyingBiologic = allModalities.some(m => QUALIFYING_BIOLOGIC_MODALITIES.has(m));
+    return {
+      rows: [],
+      coverageStatus: hasQualifyingBiologic ? 'excluded-biologic-no-oncology' : 'excluded-small-molecule',
+      companyWebsite, pipelineUrl,
+      nonQualifyingModalities: allModalities,
+    };
+  }
+
+  // Deduplicate by drugId — keep best modality per drug using MODALITY_PRIORITY
+  const byDrugId = {};
+  for (const row of qualifying) {
+    const id = String(row.drugId);
+    if (!byDrugId[id]) {
+      byDrugId[id] = row;
+    } else {
+      const cur = MODALITY_PRIORITY[byDrugId[id].drugTypeCaption] || 99;
+      const nxt = MODALITY_PRIORITY[row.drugTypeCaption] || 99;
+      if (nxt < cur) byDrugId[id] = row;
+    }
+  }
+
+  const rows = Object.values(byDrugId).map(r => ({
+    drugId:           r.drugId,
+    drug:             r.drugPrimaryName ? r.drugPrimaryName.replace(/BeiGene/gi, 'BeOne') : r.drugPrimaryName,
+    altNames:         r.altNames ? r.altNames.replace(/BeiGene/gi, 'BeOne') : '',
+    citelineModality: r.drugTypeCaption,
+    citelinePhase:    r.globalStatus,
+    status:           r.globalStatus,
+    companyWebsite:   null,
+    targets:          r.allMechanisms  || 'Undisclosed',
+    indications:      r.allDiseases    || '',
+    allLicensees:     r.allLicensees   || '',
+    allLicensers:     r.allLicensers   || '',
+    allTerritories:   r.allTerritories || '',
+    allDealTypes:     r.allDealTypes   || '',
+    allManufacturers: r.allManufacturers || '',
+    allPayloads:      r.allPayloads    || '',
+    allTargets:       r.allTargets     || '',
+  }));
+
+  return { rows, coverageStatus: 'qualifying', companyWebsite, pipelineUrl };
+}
+
+async function citelineGetAssets(companyName) {
+  if (citelineIndex) return citelineGetAssetsLocal(companyName);
+  const pool = await getCitelinePool();
+  const result = await pool.request()
+    .input('company', sql.NVarChar(200), companyName)
+    .query(CITELINE_ASSETS_SQL);
+
+  if (result.recordset.length > 0) {
+    return {
+      rows: result.recordset,
+      coverageStatus: 'qualifying',
+      companyWebsite: result.recordset[0]?.companyWebsite || null,
+      pipelineUrl:    result.recordset[0]?.pipelineUrl    || null,
+    };
+  }
+
+  // 0 qualifying assets — check what the company actually has in Citeline
+  const checkResult = await pool.request()
+    .input('company', sql.NVarChar(200), companyName)
+    .query(CITELINE_MODALITY_CHECK_SQL);
+
+  if (checkResult.recordset.length === 0) {
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null };
+  }
+
+  const companyWebsite = checkResult.recordset.find(r => r.companyWebsite)?.companyWebsite || null;
+  const modalityRows   = checkResult.recordset.filter(r => r.drugTypeCaption != null);
+
+  if (modalityRows.length === 0) {
+    // Company exists in Citeline but has no drug records at all
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite };
+  }
+
+  const hasQualifyingBiologic = modalityRows.some(r => QUALIFYING_BIOLOGIC_MODALITIES.has(r.drugTypeCaption));
+  return {
+    rows: [],
+    coverageStatus: hasQualifyingBiologic ? 'excluded-biologic-no-oncology' : 'excluded-small-molecule',
+    companyWebsite,
+    nonQualifyingModalities: [...new Set(modalityRows.map(r => r.drugTypeCaption))],
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1336,10 +1963,10 @@ function computePhaseSynergy(asset, ctgov) {
 // Targets that qualify for checkpoint-IO-alt flag
 const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a'];
 
-// Compute flags directly from Pharmcube Steps 1+2 asset data (no web research needed).
+// Compute flags directly from Steps 1+2 asset data (no web research needed).
 // Called automatically after every screening run — no manual autoflag step required
 // for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
-// adc-novel-payload and TCE masking moiety still need manual autoflag (not in Pharmcube data).
+// adc-novel-payload and TCE masking moiety still need manual autoflag (payload detail not in Citeline data).
 function computeFlagsFromAsset(asset) {
   if (!asset || asset.overallStatus === 'excluded') return [];
   const flags = new Set();
@@ -1350,10 +1977,10 @@ function computeFlagsFromAsset(asset) {
   // Indication synergy — keyword match on indication field
   if (matchesIndicationSynergy(asset.indication || '')) flags.add('indication-synergy');
 
-  // Phase synergy — preclinical OR Phase 2/3 OR Phase 3
-  if (phase === 'preclinical' || phase.includes('preclinical')) flags.add('phase-synergy');
-  if (phase.includes('2/3') || phase.includes('ii/iii')) flags.add('phase-synergy');
-  if (phase === 'phase 3' || phase === 'phase iii') flags.add('phase-synergy');
+  // Phase synergy — lead optimization OR Phase 2→3 boundary only
+  const leadOptTerms = ['lead opt', 'lead optimization', 'lead candidate', 'lead selection'];
+  if (leadOptTerms.some(t => phase.includes(t))) flags.add('phase-synergy');
+  if (phase.includes('2/3') || phase.includes('ii/iii') || phase.includes('2/iii') || phase.includes('ii/3')) flags.add('phase-synergy');
 
   // Strategic — checkpoint IO alt: non-PD1/PD-L1 checkpoint target, or bsAb/tsAb hitting PD-1/PD-L1
   const hasPD = targets.some(t => t.includes('pd-1') || t.includes('pd-l1') || t === 'pd1' || t === 'pdl1');
@@ -1474,211 +2101,224 @@ Return ONLY this JSON, nothing else:
   return null; // exhausted the budget without a clear answer — don't guess
 }
 
+
+
 // ─────────────────────────────────────────────────────────────
-// Pharmcube primary track — Claude loop using drugBaseLiteCN + drugDeal + web tools
-// Returns a full result object. If status=inconclusive and inconclusiveReason
-// contains "not found in Pharmcube", the caller should run the secondary track.
+// Citeline primary track — SQL Steps 1+2, then Claude for Steps 3+4+5
+// Returns a full result object, or null if no qualifying assets found (fall through).
 // ─────────────────────────────────────────────────────────────
 
-const PHARMCUBE_CREDIT_CAP = 450;
-const PHARMCUBE_UNIT_PRICES = { drugBaseLiteCN: 15, drugDeal: 18 };
+async function screenWithCitelinePrimary(companyName, client) {
+  console.log(`    [${companyName}] [citeline] querying Citeline SQL...`);
+  const { rows, coverageStatus, companyWebsite, pipelineUrl, nonQualifyingModalities } = await citelineGetAssets(companyName);
 
-function estimatePharmcubeCallCost(toolName, output) {
-  const price = PHARMCUBE_UNIT_PRICES[toolName];
-  if (!price) return 0;
-  try {
-    const parsed = JSON.parse(output);
-    for (const val of Object.values(parsed)) {
-      if (Array.isArray(val)) return val.length * price;
+  if (coverageStatus !== 'qualifying') {
+    if (coverageStatus === 'inconclusive-not-found') {
+      console.log(`    [${companyName}] [citeline] company not found in Citeline — falling through`);
+      return null;
     }
-  } catch (_) {}
-  return 0;
-}
-
-async function screenWithPharmcubePrimary(companyName, client, opts = {}) {
-  const { resumeFromState } = opts;
-  const skipCreditCap = !!resumeFromState;
-
-  let initialContent;
-  if (resumeFromState) {
-    const historyText = (resumeFromState.callHistory || []).map((call, i) =>
-      `[Call ${i + 1} — ${call.toolName}(${JSON.stringify(call.input).slice(0, 80)})]\n${call.rawOutput}`
-    ).join('\n\n');
-    initialContent =
-      `Screen this company through the Pharmcube primary track: "${companyName}"\n\n` +
-      `=== RESUME FROM CREDIT CAP PAUSE ===\n` +
-      `The user approved continuing past the credit cap. Do NOT call drugBaseLiteCN again — ` +
-      `that data was already fetched and is provided below. You may still call drugDeal if ` +
-      `Steps 1+2 identified qualifying assets and drugDeal is NOT already in the history below. ` +
-      `Step 5 web research tools remain available as normal. The per-company credit cap is suspended.\n\n` +
-      `Previous Pharmcube API calls:\n${historyText}\n\n` +
-      `Credits already used: ~${resumeFromState.creditsUsed} pts.\n` +
-      `=== END RESUME DATA ===\n\n` +
-      `Start at STEP 3 (Competitive Overlap) using the drug data above, then proceed to Steps 4 and 5 normally.`;
-  } else {
-    initialContent = `Screen this company through the Pharmcube primary track: "${companyName}"\n\nStart immediately by calling drugBaseLiteCN. Do not run web_search first.`;
+    const modSample = (nonQualifyingModalities || []).slice(0, 3).join(', ');
+    const excludedReason = coverageStatus === 'excluded-small-molecule'
+      ? `No oncology biologics in Citeline — small molecule pipeline (${modSample})`
+      : `Biologic pipeline present but no anticancer indication in Citeline (${modSample})`;
+    console.log(`    [${companyName}] [citeline] ${excludedReason}`);
+    return {
+      name: companyName, id: slugify(companyName), type: 'unknown',
+      website: companyWebsite, status: 'excluded', sourceTrack: 'citeline',
+      excludedAt: 'Steps 1+2', excludedReason,
+      inconclusiveReason: '', assets: [], beoneAnalyzed: false, beoneOutcome: null,
+      flags: [], researchNotes: '', allSourcesConsulted: [], evidenceSnapshots: [],
+      sources: [{ url: 'citeline:sql', label: 'Citeline database (Steps 1+2)', usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline' }],
+    };
   }
 
-  const messages = [{ role: 'user', content: initialContent }];
+  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
+  const allNDR = rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
 
-  const MAX_ITERATIONS = 14;
-  const collectedSources = [];
+  const thinCoverage = rows.length <= 2
+    || rows.some(r => !r.targets || r.targets.trim() === '')
+    || allNDR;
+
+  const assetLines = rows.map((r, i) => {
+    const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
+    const phase    = CITELINE_PHASE_MAP[r.citelinePhase] || r.citelinePhase || 'Unknown';
+    let line =
+      `[${i + 1}] ${r.drug} (drugId: ${r.drugId})\n` +
+      `  AltNames   : ${r.altNames || 'None'}\n` +
+      `  Modality   : ${modality} (Citeline: ${r.citelineModality})\n` +
+      `  MOA/Targets: ${r.targets || 'Undisclosed'}\n` +
+      `  Indications: ${r.indications || 'Not specified'}\n` +
+      `  Phase      : ${phase}\n` +
+      `  Status     : ${r.status}`;
+    return line;
+  }).join('\n\n');
+
+  // Pre-fetch pipeline content for thin-coverage companies before calling Claude
+  let pipelineFetch = null;
+  if (thinCoverage) {
+    if (pipelineUrl) {
+      console.log(`    [${companyName}] [citeline] thin-coverage: fetching pipeline URL from spreadsheet: ${pipelineUrl}`);
+      const content = await fetchWebpage(pipelineUrl);
+      pipelineFetch = { url: pipelineUrl, content };
+    } else if (companyWebsite) {
+      // No dedicated pipeline URL — always crawl the company homepage to find
+      // the best pipeline/science/drug subpage. Hard 15s wall clock limit.
+      console.log(`    [${companyName}] [citeline] thin-coverage: crawling ${companyWebsite} for pipeline subpage (15s max)`);
+      const timeout = new Promise(resolve => setTimeout(() => resolve(null), 15000));
+      pipelineFetch = await Promise.race([findAndFetchPipelinePage(companyWebsite), timeout]);
+      if (pipelineFetch) {
+        console.log(`    [${companyName}] [citeline] thin-coverage: found pipeline page: ${pipelineFetch.url}`);
+      } else {
+        console.log(`    [${companyName}] [citeline] thin-coverage: no pipeline page found or timed out`);
+      }
+    }
+  }
+
+  const sparseReason = allNDR ? 'all assets show "No Development Reported"'
+    : rows.length <= 2    ? `only ${rows.length} asset(s) found`
+    : 'missing target data';
+
+  const thinCoverageInstruction = !thinCoverage
+    ? `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`
+    : pipelineFetch
+    ? `THIN COVERAGE — PIPELINE PAGE PRE-FETCHED:\n` +
+      `Citeline data is sparse (${sparseReason}). The pipeline page has been fetched below — treat it as a supplementary source alongside the Citeline assets above.\n` +
+      `Merge both into a single asset list:\n` +
+      `  • Assets in both sources: keep Citeline drugId/altNames/modality, enrich with website details\n` +
+      `  • Assets only on website: include with modality/target/phase from the page\n` +
+      `  • Exclude anything the website marks as ceased, discontinued, terminated, or withdrawn\n` +
+      `Then run Steps 3–5 on the merged list.\n\n` +
+      `PIPELINE PAGE (${pipelineFetch.url}):\n${'─'.repeat(60)}\n${pipelineFetch.content.slice(0, 8000)}\n${'─'.repeat(60)}`
+    : `THIN COVERAGE — NO PIPELINE PAGE AVAILABLE:\n` +
+      `Citeline data is sparse (${sparseReason}) and no website URL is available for enrichment.\n` +
+      `Proceed with available Citeline assets and flag as thin-coverage.`;
+
+  const messages = [{
+    role: 'user',
+    content:
+      `Screen this company through the Citeline primary track: "${companyName}"\n\n` +
+      `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
+      `${assetLines}\n\n` +
+      `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
+      thinCoverageInstruction,
+  }];
+
+  const MAX_ITERATIONS = 50;
   const fetchedUrls = [];
   const evidenceSnapshots = [];
-  let pharmcubeCreditsUsed = resumeFromState ? (resumeFromState.creditsUsed || 0) : 0;
-  const pharmcubeCallHistory = [];
+  let oneBdCompanyId   = null;
+  let oneBdDealsFetched = false;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 8000,
       temperature: 0,
-      system: PHARMCUBE_PRIMARY_PROMPT,
-      tools: PHARMCUBE_TOOLS,
+      system: CITELINE_PRIMARY_PROMPT,
+      tools: CITELINE_TOOLS,
       messages,
     });
 
     messages.push({ role: 'assistant', content: response.content });
 
-    for (const block of response.content) {
-      if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
-        for (const item of block.content) {
-          if (item && item.url) {
-            collectedSources.push({ url: item.url, title: item.title || '' });
-            evidenceSnapshots.push({
-              type: 'search-result',
-              url: item.url,
-              title: item.title || '',
-              retrievedAt: new Date().toISOString(),
-              contentSnippet: item.snippet || item.description || null,
-              contentHash: null,
-            });
-          }
-        }
-      }
-    }
-
     if (response.stop_reason === 'end_turn') {
-      const textBlock = response.content.find(b => b.type === 'text');
-      const jsonMatch = textBlock && textBlock.text.match(/\{[\s\S]*\}/);
-
-      if (!jsonMatch) {
-        console.log(`    [${companyName}] [pharmcube] [warn] No JSON — requesting conversion`);
+      if (oneBdCompanyId && !oneBdDealsFetched) {
+        console.log(`    [${companyName}] [citeline] [guard] onebd_get_deals skipped — fetching now`);
+        let dealsOutput;
+        try {
+          dealsOutput = await oneBdGetDealsForTool(oneBdCompanyId);
+          oneBdDealsFetched = true;
+        } catch (e) {
+          dealsOutput = JSON.stringify({ deals: [], error: e.message });
+        }
         messages.push({
           role: 'user',
-          content: 'Return ONLY the JSON screening result now — no other text.',
+          content:
+            `MANDATORY CORRECTION: You must call onebd_get_deals before producing output.\n` +
+            `Here are all Cortellis deals for this company (company_id=${oneBdCompanyId}):\n\n${dealsOutput}\n\n` +
+            `Apply Steps 4+5 using these deals, then return the complete revised JSON.`,
         });
         continue;
       }
 
+      const textBlock = response.content.find(b => b.type === 'text');
+      const jsonMatch = textBlock && textBlock.text.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        messages.push({ role: 'user', content: 'Return ONLY the JSON screening result now — no other text.' });
+        continue;
+      }
+
       const result = JSON.parse(jsonMatch[0]);
-      result.name = companyName;
-      result.id = slugify(companyName);
-      result.sourceTrack = 'pharmcube';
+      result.name        = companyName.replace(/BeiGene/gi, 'BeOne');
+      result.id          = slugify(companyName);
+      result.sourceTrack = 'citeline';
+      result.website     = result.website || companyWebsite || null;
       if (result.beoneAnalyzed == null) result.beoneAnalyzed = false;
       if (result.beoneOutcome  == null) result.beoneOutcome  = null;
       if (!Array.isArray(result.flags)) result.flags = [];
+      if (!Array.isArray(result.deals)) result.deals = [];
+      if (thinCoverage && !result.flags.includes('thin-coverage')) result.flags.push('thin-coverage');
       result.allSourcesConsulted = [...new Set(fetchedUrls)];
-      result.evidenceSnapshots = evidenceSnapshots;
+      result.evidenceSnapshots   = evidenceSnapshots;
 
-      if (result.externalSourcing === true) {
-        const sourceMap = new Map();
-        for (const s of collectedSources) sourceMap.set(s.url, s);
-        if (Array.isArray(result.externalSources)) {
-          for (const s of result.externalSources) if (s && s.url) sourceMap.set(s.url, s);
-        }
-        result.externalSources = Array.from(sourceMap.values());
-      } else {
-        result.externalSourcing = false;
-        result.externalSources = [];
+      if (!Array.isArray(result.sources)) result.sources = [];
+      if (!result.sources.some(s => s.url === 'citeline:sql')) {
+        result.sources.unshift({
+          url: 'citeline:sql', label: 'Citeline database (Steps 1+2)',
+          usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline',
+        });
       }
 
       return result;
     }
 
     if (response.stop_reason === 'pause_turn') {
-      console.log(`    [${companyName}] [pharmcube] [pause_turn] iteration ${i + 1}/${MAX_ITERATIONS}`);
+      console.log(`    [${companyName}] [citeline] [pause_turn] iteration ${i + 1}`);
       continue;
     }
 
     if (response.stop_reason === 'tool_use') {
-      const toolUses = response.content.filter(b => b.type === 'tool_use');
+      const toolUses   = response.content.filter(b => b.type === 'tool_use');
       const toolResults = [];
 
       for (const toolUse of toolUses) {
-        console.log(`    [${companyName}] [pharmcube] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 100)}`);
+        console.log(`    [${companyName}] [citeline] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 100)}`);
         let output;
         try {
-          if (toolUse.name === 'drugBaseLiteCN' || toolUse.name === 'drugDeal') {
-            output = await callPharmcubeTool(toolUse.name, toolUse.input);
-            pharmcubeCallHistory.push({ toolName: toolUse.name, input: toolUse.input, rawOutput: output });
-            pharmcubeCreditsUsed += estimatePharmcubeCallCost(toolUse.name, output);
-            console.log(`    [${companyName}] [pharmcube] [credits] ~${pharmcubeCreditsUsed} pts used so far`);
-          } else if (toolUse.name === 'fetch_webpage') {
-            fetchedUrls.push(toolUse.input.url);
-            output = await fetchWebpage(toolUse.input.url, toolUse.input.section);
-            evidenceSnapshots.push(makeEvidenceSnapshot(toolUse.input.url, output));
+          if (toolUse.name === 'onebd_resolve_company') {
+            output = await oneBdResolveCompanyForTool(toolUse.input.companyName);
+            try {
+              const parsed = JSON.parse(output);
+              if (parsed.found && parsed.id) oneBdCompanyId = parsed.id;
+            } catch (_) {}
+          } else if (toolUse.name === 'onebd_get_deals') {
+            output = await oneBdGetDealsForTool(toolUse.input.companyId);
+            oneBdDealsFetched = true;
+          } else if (toolUse.name === 'onebd_resolve_asset') {
+            output = await oneBdResolveAssetForTool(toolUse.input.assetName);
           } else {
-            output = 'Unknown tool.';
+            output = `Unknown tool: ${toolUse.name}`;
           }
         } catch (e) {
           output = `Tool error: ${e.message}`;
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
-
-        if (!skipCreditCap && pharmcubeCreditsUsed > PHARMCUBE_CREDIT_CAP) {
-          console.log(`    [${companyName}] [pharmcube] [cap] Credit cap exceeded (~${pharmcubeCreditsUsed} pts) — pausing for user`);
-          return {
-            name: companyName,
-            id: slugify(companyName),
-            type: 'unknown',
-            website: null,
-            status: 'paused',
-            sourceTrack: 'pharmcube',
-            excludedAt: null,
-            excludedReason: '',
-            inconclusiveReason: `Pharmcube credit cap reached (~${pharmcubeCreditsUsed} pts) — click Continue to proceed`,
-            creditsUsed: pharmcubeCreditsUsed,
-            pausedState: { callHistory: pharmcubeCallHistory, creditsUsed: pharmcubeCreditsUsed },
-            assets: [],
-            beoneAnalyzed: false,
-            beoneOutcome: null,
-            flags: [],
-            externalSourcing: false,
-            externalSources: [],
-            researchNotes: '',
-            allSourcesConsulted: [...new Set(fetchedUrls)],
-            evidenceSnapshots,
-          };
-        }
       }
-
       messages.push({ role: 'user', content: toolResults });
     } else {
       break;
     }
   }
 
-  console.log(`    [${companyName}] [pharmcube] [warn] Hit MAX_ITERATIONS — returning inconclusive`);
+  console.log(`    [${companyName}] [citeline] hit MAX_ITERATIONS — returning inconclusive`);
   return {
-    name: companyName,
-    id: slugify(companyName),
-    type: 'unknown',
-    website: null,
-    status: 'inconclusive',
-    sourceTrack: 'pharmcube',
-    excludedAt: null,
-    excludedReason: '',
-    inconclusiveReason: 'Pharmcube primary track hit iteration limit',
-    assets: [],
-    beoneAnalyzed: false,
-    beoneOutcome: null,
-    flags: [],
-    externalSourcing: false,
-    externalSources: [],
-    researchNotes: '',
-    allSourcesConsulted: [...new Set(fetchedUrls)],
-    evidenceSnapshots,
+    name: companyName, id: slugify(companyName), type: 'unknown', website: companyWebsite,
+    status: 'inconclusive', sourceTrack: 'citeline', excludedAt: null, excludedReason: '',
+    inconclusiveReason: 'Citeline primary track hit iteration limit',
+    assets: [], beoneAnalyzed: false, beoneOutcome: null, flags: [],
+    externalSourcing: false, externalSources: [], researchNotes: '',
+    allSourcesConsulted: [...new Set(fetchedUrls)], evidenceSnapshots,
   };
 }
 
@@ -1707,7 +2347,8 @@ function matchesBigPharma(companyName) {
 // ─────────────────────────────────────────────────────────────
 
 async function screenWithClaude(companyName, client, websiteUrl = null, opts = {}) {
-  const { skipPharmcube = false } = opts;
+  const { skipCiteline = false } = opts;
+
   // Step 0 first — instant, no research needed, per the plan. Skips the Claude
   // call entirely for an obvious Big Pharma match.
   const bigPharmaMatch = matchesBigPharma(companyName);
@@ -1730,45 +2371,33 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
     };
   }
 
-  // ── PRIMARY TRACK: Pharmcube MCP ──────────────────────────────────────────────
-  const pharmcubeApiKey = process.env.PHARMCUBE_API_KEY || process.env.pharmcube_api_key;
-  if (pharmcubeApiKey && !skipPharmcube) {
-    console.log(`    [${companyName}] [primary-track] Pharmcube MCP`);
-    let pharmResult;
+  // ── PRIMARY TRACK: Citeline SQL (Steps 1+2) ───────────────────────────────────
+  let autoEscalatedFromNDR = false;
+  if (!skipCiteline && DefaultAzureCredential) {
+    console.log(`    [${companyName}] [primary-track] Citeline SQL`);
+    let citelineResult = null;
     try {
-      pharmResult = await screenWithPharmcubePrimary(companyName, client);
+      citelineResult = await screenWithCitelinePrimary(companyName, client);
     } catch (e) {
-      console.log(`    [${companyName}] [pharmcube] [error] ${e.message} — falling through to secondary track`);
-      pharmResult = null;
+      console.log(`    [${companyName}] [citeline] [error] ${e.message} — falling through to secondary track`);
     }
-
-    if (pharmResult) {
-      // Only route to secondary if Pharmcube explicitly says "not found"
-      const notFound = pharmResult.status === 'inconclusive' &&
-        /not found in pharmcube/i.test(pharmResult.inconclusiveReason || '');
-
-      if (!notFound) {
-        applyAutoFlags(pharmResult);
-        logScreeningBreakdown(pharmResult);
-        console.log(`    [${companyName}] [FINAL] ${pharmResult.status} (pharmcube track)${pharmResult.excludedAt ? ' — excluded at ' + pharmResult.excludedAt : ''}${pharmResult.inconclusiveReason ? ' — ' + pharmResult.inconclusiveReason : ''}`);
-        return pharmResult;
-      }
-      console.log(`    [${companyName}] [primary→secondary] Not in Pharmcube — falling through to web research`);
+    if (citelineResult) {
+      applyAutoFlags(citelineResult);
+      logScreeningBreakdown(citelineResult);
+      console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' — excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' — ' + citelineResult.inconclusiveReason : ''}`);
+      return citelineResult;
     }
-  } else {
-    console.log(`    [${companyName}] [secondary-track] No PHARMCUBE_API_KEY — using web research directly`);
+    console.log(`    [${companyName}] [citeline→secondary] No qualifying assets in Citeline — routing to secondary track`);
   }
   // ──────────────────────────────────────────────────────────────────────────────
-  // SECONDARY TRACK: full web research methodology (original public/private tracks)
-  // Runs when: (a) company not found in Pharmcube, (b) no Pharmcube key configured,
-  // or (c) Pharmcube threw an error.
-  // ──────────────────────────────────────────────────────────────────────────────
+
+  // ── SECONDARY TRACK: web research methodology ────────────────────────────────
   console.log(`    [${companyName}] [secondary-track] Web research methodology`);
 
   const messages = [
     {
       role: 'user',
-      content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"${websiteUrl ? `\n\nURL PROVIDED: The company's website is already known: ${websiteUrl}\nIn Step 0a, fetch this URL directly instead of running a web_search — skip the search entirely and go straight to fetch_webpage("${websiteUrl}").` : ''}
+      content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"${websiteUrl ? `\n\nURL PROVIDED: The company's website is already known: ${websiteUrl}\nIn Step 0a, fetch this URL directly instead of running a web_search — skip the search entirely and go straight to fetch_webpage("${websiteUrl}").` : ''}${skipCiteline ? `\n\nCONTEXT — WEBSITE TRACK: This company was found in Citeline with thin coverage (≤2 qualifying assets or missing target data). Use the WEBSITE track methodology to get richer asset data and complete layers 3–5. The website URL is pre-supplied above — start there. You may find additional qualifying assets beyond what Citeline reported; include all active ones in assets[]. Exclude any assets explicitly marked as ceased, discontinued, terminated, withdrawn, or suspended.` : ''}
 
 BUDGET: you have at most 6 tool calls total for this company (the external-sourcing fallback
 in step 0a below has its own separate, additional sub-cap — see that step). Track your count.
@@ -1984,12 +2613,13 @@ Return the JSON screening result now.`
       }
 
       const result = JSON.parse(jsonMatch[0]);
-      result.name = companyName;
+      result.name = companyName.replace(/BeiGene/gi, 'BeOne');
       result.id   = slugify(companyName);
       result.sourceTrack = result.sourceTrack || 'secondary';
       if (result.beoneAnalyzed == null) result.beoneAnalyzed = false;
       if (result.beoneOutcome  == null) result.beoneOutcome  = null;
       if (!Array.isArray(result.flags)) result.flags = [];
+      if (!Array.isArray(result.deals)) result.deals = [];
 
       // Claude's own judgment call on whether the website itself was ever usable
       // drives externalSourcing — a search happening at all (e.g. step 0a finding
@@ -2105,7 +2735,7 @@ Return the JSON screening result now.`
 
 function logScreeningBreakdown(result) {
   const tag = `[${result.name}]`;
-  const track = result.sourceTrack === 'pharmcube' ? 'pharmcube' : 'secondary (web research)';
+  const track = result.sourceTrack === 'citeline' ? 'citeline (primary)' : 'secondary (web research)';
   console.log(`    ${tag} [track] ${track}`);
 
   if (result.excludedAt === 'pre-filter') {
@@ -2160,7 +2790,7 @@ function buildScreenerLog(result) {
 
   lines.push(`${tag} Status: ${result.status.toUpperCase()}`);
   if (result.sourceTrack) {
-    const trackLabel = result.sourceTrack === 'pharmcube' ? 'Pharmcube MCP (primary)' : 'Web research (secondary)';
+    const trackLabel = result.sourceTrack === 'citeline' ? 'Citeline SQL (primary)' : 'Web research (secondary)';
     lines.push(`${tag} [track] ${trackLabel}`);
   }
 
@@ -2261,7 +2891,7 @@ app.get('/api/runs/:id', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 app.post('/api/screen', async (req, res) => {
-  const { company, runId, websiteUrl, skipPharmcube } = req.body;
+  const { company, runId, websiteUrl } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company name' });
 
   const apiKey = req.headers['x-api-key'] ||
@@ -2287,7 +2917,7 @@ app.post('/api/screen', async (req, res) => {
     }
     // ────────────────────────────────────────────────────────
 
-    const result = await screenWithClaude(company, client, websiteUrl || null, { skipPharmcube: !!skipPharmcube });
+    const result = await screenWithClaude(company, client, websiteUrl || null);
     applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' — ' + result.inconclusiveReason : ''}`);
@@ -2332,43 +2962,35 @@ app.post('/api/screen', async (req, res) => {
   }
 });
 
+
 // ─────────────────────────────────────────────────────────────
-// Resume endpoint — continue a company that was paused at the credit cap.
-// The client sends back the pausedState (call history + credits used) so
-// Claude can pick up at Step 3 without re-calling Pharmcube.
+// Website Track endpoint — supplemental research for thin-coverage companies
+// already found in Citeline. Skips primary Citeline query and runs the
+// secondary WEBSITE track with the provided URL.
 // ─────────────────────────────────────────────────────────────
-app.post('/api/screen/resume', async (req, res) => {
-  const { company, runId, pausedState } = req.body;
-  if (!company || !pausedState) return res.status(400).json({ error: 'Missing company or pausedState' });
+
+app.post('/api/screen/website-track', async (req, res) => {
+  const { companyName, websiteUrl } = req.body;
+  if (!companyName) return res.status(400).json({ error: 'Missing companyName' });
+  if (!websiteUrl)  return res.status(400).json({ error: 'Missing websiteUrl — thin-coverage company must have a Citeline website URL' });
 
   const apiKey = req.headers['x-api-key'] ||
     process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured' });
+  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured.' });
 
-  console.log(`\n${'─'.repeat(60)}\n[${company}] RESUME from credit cap (~${pausedState.creditsUsed} pts used)\n${'─'.repeat(60)}`);
+  console.log(`\n${'─'.repeat(60)}\n[${companyName}] Website Track (supplemental): ${websiteUrl}\n${'─'.repeat(60)}`);
 
   try {
     const client = new Anthropic({ apiKey, maxRetries: 5 });
-    const result = await screenWithPharmcubePrimary(company, client, { resumeFromState: pausedState });
+    const result = await screenWithClaude(companyName, client, websiteUrl, { skipCiteline: true });
     applyAutoFlags(result);
     logScreeningBreakdown(result);
+    console.log(`    [${companyName}] [website-track FINAL] ${result.status}`);
     result.screenerLog = buildScreenerLog(result);
-    if (runId) saveCompanyToDb(runId, result);
     res.json(result);
   } catch (err) {
-    console.error(`  [${company}] ✗ resume error: ${err.message}`);
-    const errorResult = {
-      name: company,
-      id: slugify(company),
-      status: 'inconclusive',
-      inconclusiveReason: `Resume error: ${err.message}`,
-      assets: [],
-      flags: [],
-      sourceTrack: 'pharmcube',
-    };
-    errorResult.screenerLog = buildScreenerLog(errorResult);
-    if (runId) saveCompanyToDb(runId, errorResult);
-    res.json(errorResult);
+    console.error(`  [${companyName}] ✗ website-track: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2582,4 +3204,5 @@ function slugify(name) {
 app.listen(PORT, () => {
   console.log(`\n✓ BeOne Screener running → http://localhost:${PORT}`);
   console.log(`  Open that URL in your browser (not the file directly)\n`);
+  loadCitelineSpreadsheet();
 });

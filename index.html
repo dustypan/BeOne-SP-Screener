@@ -278,6 +278,10 @@
         <input type="checkbox" id="hide-competitors-toggle" checked>
         Hide direct competitors
       </label>
+      <label class="toggle-wrap">
+        <input type="checkbox" id="show-screened-out-toggle">
+        Show screened-out assets
+      </label>
       <span id="results-asset-count"></span>
       <button id="autoflag-btn" class="btn-outline">🚩 Flag High Priority Assets</button>
       <button id="export-csv-btn" class="btn-outline">⬇ Export CSV</button>
@@ -292,6 +296,8 @@
             <th>Asset</th>
             <th>Modality</th>
             <th>Target(s)</th>
+            <th>Phase</th>
+            <th>Indication</th>
             <th>Flags</th>
           </tr>
         </thead>
@@ -305,6 +311,23 @@
       <button id="page-prev" class="btn-page">← Prev</button>
       <span id="page-indicator"></span>
       <button id="page-next" class="btn-page">Next →</button>
+    </div>
+
+    <!-- All-assets-excluded qualifying companies -->
+    <div id="all-excluded-footer" class="hidden">
+      <h3 class="all-excluded-heading">✗ Excluded Companies (all assets out-licensed or covered)</h3>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Assets</th>
+              <th>Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="all-excluded-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Excluded footer -->

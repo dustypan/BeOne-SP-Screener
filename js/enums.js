@@ -25,6 +25,7 @@ const FLAG_DEFS = {
   'indication-synergy':  { label: 'Indication Synergy',          category: 'Indication Synergy', color: 'red'    },
   'phase-synergy':       { label: 'Phase Synergy',               category: 'Phase Synergy',      color: 'blue'   },
   'check-mfg-partner':   { label: 'Check Mfg Partner',           category: 'Action Required',    color: 'orange' },
+  'thin-coverage':       { label: 'Thin Coverage',               category: 'Data Quality',        color: 'yellow' },
 };
 
 const BIG_PHARMA = [

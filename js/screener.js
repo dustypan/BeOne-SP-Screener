@@ -1,7 +1,7 @@
 'use strict';
 
 // ──────────────────────────────────────────────────────────────
-// Layer 5 — direct competitor check (pure data, no fetch)
+// Layer 3 — direct competitor check (pure data, no fetch)
 // ──────────────────────────────────────────────────────────────
 
 // "msAb" (monospecific antibody) is standard terminology for the same thing as "mAb" —
@@ -11,7 +11,7 @@ function normalizeModality(modality) {
   return m.toLowerCase() === 'msab' ? 'mAb' : m;
 }
 
-function computeLayer5(asset) {
+function computeLayer3(asset) {
   if (asset.isPlatform) {
     return { status: 'inconclusive', reason: 'Platform record — Layer 5 not applicable' };
   }
@@ -109,9 +109,9 @@ function resolveCompany(name) {
   // Deep clone so we don't mutate the source data
   const company = JSON.parse(JSON.stringify(existing));
 
-  // Compute Layer 5 at runtime for each asset
+  // Compute Layer 3 (competitive overlap) at runtime for each asset
   for (const asset of company.assets || []) {
-    asset.layer5 = computeLayer5(asset);
+    asset.layer3 = computeLayer3(asset);
   }
 
   return company;

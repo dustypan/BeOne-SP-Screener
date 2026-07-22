@@ -298,7 +298,7 @@ async function runScreener(names) {
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
-          asset.layer5 = computeLayer5(asset);
+          asset.layer3 = computeLayer3(asset);
         }
 
         // Apply persisted BeOne review
@@ -376,7 +376,7 @@ function renderSummary() {
   setCount('count-inconclusive', inconclusive.length);
 
   renderBucketList('list-qualifying', qualifying, c =>
-    `${(c.assets || []).filter(a => !a.layer5 || a.layer5.status !== 'fail').length} asset(s) qualifying`
+    `${(c.assets || []).filter(a => !a.layer3 || a.layer3.status !== 'fail').length} asset(s) qualifying`
   );
   renderBucketList('list-excluded', excluded, c => {
     const at = c.excludedAt ? ` (Layer ${c.excludedAt.replace('layer', '')})` : c.excludedAt === 'pre-filter' ? ' (Pre-filter)' : '';
@@ -591,7 +591,7 @@ async function continueCompanyScreening(companyId) {
     if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
     const result = await resp.json();
     for (const asset of result.assets || []) {
-      asset.layer5 = computeLayer5(asset);
+      asset.layer3 = computeLayer3(asset);
     }
     if (state.beoneReviews[result.id] != null) {
       result.beoneOutcome = state.beoneReviews[result.id];
@@ -644,7 +644,7 @@ async function runRescreening() {
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
       const result = await resp.json();
       for (const asset of result.assets || []) {
-        asset.layer5 = computeLayer5(asset);
+        asset.layer3 = computeLayer3(asset);
       }
       if (state.beoneReviews[result.id] != null) {
         result.beoneOutcome = state.beoneReviews[result.id];
@@ -927,6 +927,14 @@ function renderResults() {
     renderResultsTable();
   };
 
+  // Show screened-out toggle
+  const screenedOutToggle = document.getElementById('show-screened-out-toggle');
+  screenedOutToggle.checked = state.showScreenedOut || false;
+  screenedOutToggle.onchange = e => {
+    state.showScreenedOut = e.target.checked;
+    renderResultsTable();
+  };
+
   // Export
   document.getElementById('export-csv-btn').onclick = exportCSV;
 
@@ -939,30 +947,50 @@ function renderResults() {
   document.getElementById('autoflag-btn').onclick = runAutoFlag;
 
   renderResultsTable();
+  renderAllExcludedSection();
   renderExcludedFooter();
   renderInconclusivesFooter();
 }
 
 function getFilteredAssets(company) {
   return (company.assets || []).filter(a => {
-    if (a.overallStatus === 'excluded') return false;
-    if (state.hidingCompetitors && a.layer5 && a.layer5.status === 'fail') return false;
+    // Step 4 (rights) and Step 5 (manufacturing) excluded assets always shown — red shading inline
+    if (a.overallStatus === 'excluded' && a.layer4 && a.layer4.status === 'fail') return true;
+    if (a.overallStatus === 'excluded' && a.layer5 && a.layer5.status === 'fail') return true;
+    if (a.overallStatus === 'excluded' && !state.showScreenedOut) return false;
+    if (state.hidingCompetitors && a.layer3 && a.layer3.status === 'fail') return false;
     return true;
   });
+}
+
+function getScreenedOutReason(a) {
+  if (a.overallStatus !== 'excluded') return null;
+  if (a.layer3 && a.layer3.status === 'fail') return { step: 'Step 3 — Competitive overlap', reason: a.layer3.reason || 'Direct competitor to BeOne pipeline' };
+  if (a.layer2 && a.layer2.status === 'fail') return { step: 'Step 2 — Modality', reason: a.layer2.reason || 'Excluded modality' };
+  if (a.layer1 && a.layer1.status === 'fail') return { step: 'Step 1 — Oncology relevance', reason: a.layer1.reason || 'No oncology indication' };
+  if (a.layer4 && a.layer4.status === 'fail') return { step: 'Step 4 — Rights', reason: a.layer4.reason || 'US/global rights out-licensed' };
+  if (a.layer5 && a.layer5.status === 'fail') return { step: 'Step 5 — Manufacturing', reason: a.layer5.reason || 'US manufacturing confirmed' };
+  return { step: 'Screened out', reason: 'See research notes' };
 }
 
 function renderResultsTable() {
   const tbody = document.getElementById('results-tbody');
   const query = state.searchQuery.toLowerCase();
 
+  // Companies where ALL non-competitor assets are excluded go to the all-excluded section
+  const hasQualifyingAsset = c => (c.assets || []).some(a =>
+    a.overallStatus !== 'excluded' && !(a.layer3 && a.layer3.status === 'fail')
+  );
+
   const companies = state.wizardFiltered.filter(c => {
+    if (!hasQualifyingAsset(c)) return false;
     if (!query) return true;
     if (c.name.toLowerCase().includes(query)) return true;
     return (c.assets || []).some(a => (a.name || '').toLowerCase().includes(query));
   });
 
   if (companies.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">No qualifying companies match your current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">No qualifying companies match your current filters.</td></tr>`;
     updateResultsCount(0);
     return;
   }
@@ -972,14 +1000,14 @@ function renderResultsTable() {
 
   for (const c of companies) {
     const visibleAssets = getFilteredAssets(c);
-    const competitorAssets = (c.assets || []).filter(a => a.layer5 && a.layer5.status === 'fail');
+    const competitorAssets = (c.assets || []).filter(a => a.layer3 && a.layer3.status === 'fail');
     const companyFlags = c.flags || [];
 
     if (visibleAssets.length === 0) {
       // Company exists in filtered list but all its assets are hidden (competitors)
       html += `
         <tr class="company-row competitor-all-hidden">
-          <td colspan="5" class="company-hidden-cell">
+          <td colspan="7" class="company-hidden-cell">
             <span class="co-name">${escHtml(c.name)}</span>
             <span class="hidden-badge">${competitorAssets.length} competitor asset(s) hidden</span>
           </td>
@@ -993,16 +1021,19 @@ function renderResultsTable() {
       const rowspan = visibleAssets.length;
       const assetFlags = a.flags || [];
       const allFlags = [...new Set([...companyFlags, ...assetFlags])];
-      const isCompetitor = a.layer5 && a.layer5.status === 'fail';
+      const isCompetitor = a.layer3 && a.layer3.status === 'fail';
+      const isScreenedOut = a.overallStatus === 'excluded';
+      const screenedOutInfo = isScreenedOut ? getScreenedOutReason(a) : null;
       const rowId = `row-${c.id}-${idx}`;
       const detailId = `detail-${c.id}-${idx}`;
 
-      totalAssetRows++;
+      if (!isScreenedOut) totalAssetRows++;
 
       html += `
-        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
+        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isScreenedOut ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
           ${isFirst ? `
             <td class="co-cell" rowspan="${rowspan}">
+              <span class="qualifying-badge" title="Qualifies for BeOne partnership outreach">✓</span>
               <div class="co-cell-inner">
                 <strong class="co-name">${escHtml(c.name)}</strong>
                 ${c.type ? `<span class="type-badge ${c.type}">${c.type === 'public' ? 'Public' : 'Private'}</span>` : ''}
@@ -1011,26 +1042,35 @@ function renderResultsTable() {
                 <button class="view-sources-btn" data-co="${escHtml(c.id)}">🔗 Sources</button>
                 ${c.screenerLog ? `<button class="co-cell-btn co-console-btn" data-co-id="${escHtml(c.id)}">📋 Console</button>` : ''}
                 ${c.researchNotes ? `<button class="co-cell-btn co-notes-btn" data-co-id="${escHtml(c.id)}">📋 Notes</button>` : ''}
+                ${companyFlags.includes('thin-coverage') ? `<button class="co-cell-btn co-website-track-btn" data-co-id="${escHtml(c.id)}" data-co-website="${escHtml(c.website || '')}">🔍 Website Track</button>` : ''}
+                ${(c.deals || []).length ? `<button class="co-cell-btn co-deals-btn" data-co-id="${escHtml(c.id)}">📄 ${c.deals.length} Deal${c.deals.length !== 1 ? 's' : ''}</button>` : ''}
                 ${!state.hidingCompetitors && competitorAssets.length > 0 ? `
                   <span class="comp-count">${competitorAssets.length} competitor</span>` : ''}
               </div>
+              ${(c.deals || []).length ? renderDealsPanel(c) : ''}
             </td>
           ` : ''}
           <td class="asset-name-cell">
             ${escHtml(a.name || (a.isPlatform ? '[Platform]' : '—'))}
             ${isCompetitor ? '<span class="comp-tag">competitor</span>' : ''}
+            ${isScreenedOut && screenedOutInfo ? `<span class="screened-out-tag">${escHtml(screenedOutInfo.step)}</span>` : ''}
           </td>
           <td><span class="mod-tag mod-${(a.modality || '').toLowerCase().replace(/[^a-z]/g,'')}">${escHtml(a.modality || '—')}</span></td>
-          <td class="targets-cell">${(a.targets || []).map(t => `<span class="tgt-tag">${escHtml(t)}</span>`).join('')}</td>
+          <td class="targets-cell">${(a.targets || []).length ? (a.targets || []).map(t => `<span class="tgt-tag">${escHtml(t)}</span>`).join('') : '<span class="undisclosed">Undisclosed</span>'}</td>
+          <td class="phase-cell">${escHtml(a.phase || '—')}</td>
+          <td class="indication-cell">${escHtml(a.indication || '—')}</td>
           <td class="flags-cell">
-            <div class="flags-inner">
-              ${renderFlagBadges(allFlags)}
-              <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
-            </div>
+            ${isScreenedOut && screenedOutInfo
+              ? `<span class="screened-out-reason">${escHtml(screenedOutInfo.reason)}</span>`
+              : `<div class="flags-inner">
+                  ${renderFlagBadges(allFlags)}
+                  <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
+                </div>`
+            }
           </td>
         </tr>
         <tr class="detail-row hidden" id="${detailId}">
-          <td colspan="5">${renderAssetDetail(c, a)}</td>
+          <td colspan="7">${renderAssetDetail(c, a)}</td>
         </tr>
       `;
     });
@@ -1073,6 +1113,23 @@ function renderResultsTable() {
     });
   });
 
+  // Website Track button
+  tbody.querySelectorAll('.co-website-track-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      runWebsiteTrack(btn.dataset.coId, btn.dataset.coWebsite, btn);
+    });
+  });
+
+  // Deals panel toggle
+  tbody.querySelectorAll('.co-deals-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const panel = document.getElementById(`deals-panel-${btn.dataset.coId}`);
+      if (panel) panel.classList.toggle('open');
+    });
+  });
+
   // Company notes button
   tbody.querySelectorAll('.co-notes-btn').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -1097,13 +1154,41 @@ function renderFlagBadges(flags) {
   }).join('');
 }
 
+function renderDealsPanel(company) {
+  const deals = company.deals || [];
+  if (!deals.length) return '';
+  const badgeClass = { licensing: 'rights', manufacturing: 'mfg', collaboration: 'collab', option: 'option' };
+  const items = deals.map(d => {
+    const bc = badgeClass[d.type] || 'other';
+    const scope = d.scope === 'modality-group' ? d.modalityGroup
+                : d.scope === 'specific-asset'  ? (d.assetNames || []).join(', ')
+                : d.scope === 'all'             ? 'All assets'
+                : 'Company-level';
+    return `<div class="deal-item">
+      <div class="deal-item-title">${escHtml(d.title || '—')}</div>
+      <div class="deal-item-meta">
+        <span class="deal-badge deal-badge-${bc}">${escHtml(d.type || 'deal')}</span>
+        ${d.date ? `<span>${escHtml(d.date)}</span> · ` : ''}
+        ${d.partner ? `<span>${escHtml(d.partner)}</span> · ` : ''}
+        <span>Territory: ${escHtml(d.territory || 'unspecified')}</span> ·
+        <span>Scope: ${escHtml(scope)}</span>
+      </div>
+      ${d.summary ? `<div class="deal-item-meta" style="margin-top:2px;color:var(--gray-600)">${escHtml(d.summary)}</div>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="deals-panel" id="deals-panel-${escHtml(company.id)}">
+    <div class="deals-panel-title">Cortellis Deals</div>
+    ${items}
+  </div>`;
+}
+
 function renderAssetDetail(company, asset) {
   const layerDefs = [
     { key: 'layer1', name: 'Layer 1 — Oncology Relevance' },
     { key: 'layer2', name: 'Layer 2 — Modality / Biologic' },
-    { key: 'layer3', name: 'Layer 3 — Rights Retained' },
-    { key: 'layer4', name: 'Layer 4 — US Manufacturing' },
-    { key: 'layer5', name: 'Layer 5 — Direct Competitors' },
+    { key: 'layer3', name: 'Layer 3 — Competitive Overlap' },
+    { key: 'layer4', name: 'Layer 4 — Rights Retained' },
+    { key: 'layer5', name: 'Layer 5 — US Manufacturing' },
   ];
 
   const seenSources = new Set();
@@ -1149,6 +1234,49 @@ function renderAssetDetail(company, asset) {
       ${asset.notes ? `<div class="detail-notes"><strong>Research notes:</strong> ${escHtml(asset.notes)}</div>` : ''}
     </div>
   `;
+}
+
+function renderAllExcludedSection() {
+  const section = document.getElementById('all-excluded-footer');
+  const tbody = document.getElementById('all-excluded-tbody');
+  if (!section || !tbody) return;
+
+  const hasQualifyingAsset = c => (c.assets || []).some(a =>
+    a.overallStatus !== 'excluded' && !(a.layer3 && a.layer3.status === 'fail')
+  );
+
+  const allExcluded = (state.wizardFiltered || []).filter(c => !hasQualifyingAsset(c));
+
+  if (allExcluded.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+
+  tbody.innerHTML = allExcluded.map(c => {
+    const reasons = [];
+    const l4 = (c.assets || []).filter(a => a.layer4 && a.layer4.status === 'fail');
+    const l5 = (c.assets || []).filter(a => a.layer5 && a.layer5.status === 'fail');
+    if (l4.length) {
+      const uniq = [...new Set(l4.map(a => a.layer4.reason).filter(Boolean))];
+      reasons.push('Rights out-licensed (Step 4)' + (uniq.length ? ': ' + uniq[0] : ''));
+    }
+    if (l5.length) {
+      const uniq = [...new Set(l5.map(a => a.layer5.reason).filter(Boolean))];
+      reasons.push('US mfg confirmed (Step 5)' + (uniq.length ? ': ' + uniq[0] : ''));
+    }
+    if (!reasons.length) {
+      const any = (c.assets || []).find(a => a.overallStatus === 'excluded');
+      reasons.push(any ? (any.excludedReason || 'All assets excluded') : 'All assets excluded');
+    }
+    return `
+      <tr>
+        <td><span class="all-excluded-badge" title="All assets excluded">✗</span> <strong>${escHtml(c.name)}</strong></td>
+        <td>${(c.assets || []).length}</td>
+        <td>${escHtml(reasons.join('; '))}</td>
+      </tr>`;
+  }).join('');
 }
 
 function renderExcludedFooter() {
@@ -1574,6 +1702,63 @@ function openFlagModal(companyId, assetIdx) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Website Track
+// ──────────────────────────────────────────────────────────────
+
+async function runWebsiteTrack(companyId, websiteUrl, btn) {
+  const company = state.wizardFiltered.find(c => c.id === companyId);
+  if (!company) return;
+
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+
+  try {
+    const resp = await fetch('/api/screen/website-track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyName: company.name, websiteUrl: websiteUrl || company.website || '' }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const result = await resp.json();
+
+    // Merge supplemental assets into existing company data
+    if (result.assets && result.assets.length > 0) {
+      company.assets = mergeWebsiteTrackAssets(company.assets || [], result.assets);
+    }
+    // Carry over any new flags; remove thin-coverage if research was conclusive
+    const newFlags = new Set([...(company.flags || []), ...(result.flags || [])]);
+    if (!result.thinCoverage) newFlags.delete('thin-coverage');
+    company.flags = [...newFlags];
+
+    if (result.screenerLog) company.screenerLog = (company.screenerLog || '') + '\n\n── Website Track ──\n' + result.screenerLog;
+    if (result.sources)     company.sources = [...(company.sources || []), ...result.sources];
+
+    renderResultsTable();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = origLabel;
+    alert(`Website Track failed: ${err.message}`);
+  }
+}
+
+function mergeWebsiteTrackAssets(existing, incoming) {
+  const merged = [...existing];
+  for (const na of incoming) {
+    const idx = merged.findIndex(a => a.name && na.name && a.name.toLowerCase() === na.name.toLowerCase());
+    if (idx >= 0) {
+      merged[idx] = { ...merged[idx], ...na, sourceTrack: 'website' };
+    } else {
+      merged.push({ ...na, sourceTrack: 'website' });
+    }
+  }
+  return merged;
+}
+
+// ──────────────────────────────────────────────────────────────
 // CSV Export
 // ──────────────────────────────────────────────────────────────
 
@@ -1726,7 +1911,7 @@ async function loadRun(runId) {
 
     for (const company of companies) {
       for (const asset of company.assets || []) {
-        asset.layer5 = computeLayer5(asset);
+        asset.layer3 = computeLayer3(asset);
       }
       if (state.beoneReviews[company.id] != null) {
         company.beoneOutcome = state.beoneReviews[company.id];
@@ -1779,9 +1964,9 @@ const LAYER_LABELS = {
   'pre-filter': 'Pre-screen',
   layer1: 'Layer 1 — Oncology focus',
   layer2: 'Layer 2 — Modality',
-  layer3: 'Layer 3 — Licensing',
-  layer4: 'Layer 4 — US manufacturing',
-  layer5: 'Layer 5 — Direct competitor',
+  layer3: 'Layer 3 — Competitive overlap',
+  layer4: 'Layer 4 — Rights',
+  layer5: 'Layer 5 — US manufacturing',
 };
 
 function renderRepoList(companies) {
