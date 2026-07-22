@@ -1,0 +1,26 @@
+[Ankyra] Status: QUALIFYING
+[Ankyra] [track] Citeline SQL (primary)
+[Ankyra] [pre-filter] passed — biotech/biopharma
+[Ankyra] [website] https://ankyratx.com
+[Ankyra] Asset 1/3: tolododekin alfa (Fc-fusion)
+  [Ankyra] [layer1] pass — Oncology indication confirmed via Citeline (NSCLC, solid tumors, squamous cell carcinoma)
+  [Ankyra] [layer2] pass — Modality: Fc-fusion (Fusion protein)
+  [Ankyra] [layer3] pass — No competitive overlap — IL-12 agonist Fc-fusion not in BeOne pipeline
+  [Ankyra] [layer4] pass — No licensing deals apply to this asset. Research collaborations with J&J, Merck, Regeneron, NCI, and academic institutions retain Ankyra's rights.
+  [Ankyra] [layer5] pass — No manufacturing or CDMO agreements found — manufacturing gap confirmed
+  [Ankyra] [overall] qualifying
+[Ankyra] Asset 2/3: ANK-201 (ADC)
+  [Ankyra] [layer1] pass — Oncology indication confirmed via Citeline (solid tumors)
+  [Ankyra] [layer2] pass — Modality: ADC (Antibody-drug conjugate)
+  [Ankyra] [layer3] pass — No competitive overlap — CD40 agonist ADC not in BeOne pipeline
+  [Ankyra] [layer4] pass — No licensing deals apply to this asset
+  [Ankyra] [layer5] pass — No manufacturing or CDMO agreements found — manufacturing gap confirmed
+  [Ankyra] [overall] qualifying
+[Ankyra] Asset 3/3: ANK-203 (mAb)
+  [Ankyra] [layer1] pass — Oncology indication confirmed via Citeline (solid tumors)
+  [Ankyra] [layer2] pass — Modality: mAb (Monoclonal antibody)
+  [Ankyra] [layer3] pass — No competitive overlap — CD137 agonist mAb not in BeOne pipeline
+  [Ankyra] [layer4] pass — No licensing deals apply to this asset
+  [Ankyra] [layer5] pass — No manufacturing or CDMO agreements found — manufacturing gap confirmed
+  [Ankyra] [overall] qualifying
+[Ankyra] [notes] Ankyra has 3 qualifying oncology biologics: tolododekin alfa (Phase 1 IL-12 Fc-fusion), ANK-201 (Preclinical CD40 ADC), and ANK-203 (Preclinical CD137 mAb). All three assets pass competitive overlap check (Step 3) — none match BeOne's pipeline targets. Step 4: No licensing deals apply to the qualifying assets. The 2024 Jenga Biosciences exclusive worldwide license is for JEN-101, a different asset not in the qualifying pipeline. All other deals are research collaborations, clinical trial agreements, or service contracts with no rights transfer. Step 5: No manufacturing or CDMO agreements found — manufacturing gap confirmed for all assets. Company qualifies on all three assets.
