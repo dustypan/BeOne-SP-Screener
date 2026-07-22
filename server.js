@@ -1195,6 +1195,59 @@ async function fetchWebpage(url, section) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Pipeline page finder — for thin-coverage companies, crawl the
+// homepage nav to find the /pipeline or /science subpage and
+// fetch that instead of (or in addition to) the homepage.
+// Falls back to homepage content if no pipeline link is found
+// or if the site is JS-rendered (empty homepage body).
+// ─────────────────────────────────────────────────────────────
+const PIPELINE_LINK_RE = /pipeline|our[- ]science|our[- ]programs?|science|programs?|therapeutics|drug[- ]discovery|r&d|candidates|portfolio/i;
+
+async function findAndFetchPipelinePage(homepageUrl) {
+  try {
+    const res = await axios.get(homepageUrl, {
+      timeout: 15000,
+      maxRedirects: 4,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+      },
+      validateStatus: s => s < 400,
+    });
+    if (typeof res.data !== 'string') return fetchWebpage(homepageUrl);
+
+    const $ = cheerio.load(res.data);
+
+    // Score every <a href> by whether the href path or link text matches pipeline keywords
+    const scored = [];
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const text = ($(el).text() || '').trim();
+      if (!href || /^(#|mailto:|javascript:|tel:)/.test(href)) return;
+      const score =
+        (PIPELINE_LINK_RE.test(href) ? 2 : 0) +
+        (PIPELINE_LINK_RE.test(text) ? 3 : 0);
+      if (score > 0) scored.push({ href, text, score });
+    });
+
+    // If no nav links scored (JS-rendered homepage), fall back to plain fetch
+    if (scored.length === 0) {
+      $('script,style,nav,footer,header,.nav,.footer,.cookie-banner,iframe,[aria-hidden="true"]').remove();
+      const body = $('body').text().replace(/\s+/g, ' ').trim();
+      return body.length > 100 ? body.slice(0, 15000) : fetchWebpage(homepageUrl);
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const pipelineUrl = new URL(scored[0].href, homepageUrl).href;
+    console.log(`      [pipeline-finder] → ${pipelineUrl} ("${scored[0].text}", score=${scored[0].score})`);
+    return fetchWebpage(pipelineUrl);
+  } catch (e) {
+    // Any error — fall back to plain homepage fetch
+    return fetchWebpage(homepageUrl);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Evidence snapshot — captures what was actually read for audit trail
 // ─────────────────────────────────────────────────────────────
 
@@ -2112,30 +2165,43 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
     return line;
   }).join('\n\n');
 
-  const steps345Instruction = `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`;
-
-  // For thin-coverage companies, pre-fetch the company website so Claude has richer
-  // asset data without needing to spend a tool-call turn on it.
+  // For thin-coverage companies, pre-fetch the pipeline page so Claude has the
+  // full asset list from the website to merge with Citeline data.
   let websiteContent = null;
+  let fetchedPipelineUrl = null;
   if (thinCoverage && companyWebsite) {
-    console.log(`    [${companyName}] [citeline] thin coverage — pre-fetching website: ${companyWebsite}`);
-    emit('🌐 Thin coverage — fetching company website…');
+    console.log(`    [${companyName}] [citeline] thin coverage — finding pipeline page: ${companyWebsite}`);
+    emit('🌐 Thin coverage — fetching pipeline page…');
     try {
-      websiteContent = await fetchWebpage(companyWebsite);
+      websiteContent = await findAndFetchPipelinePage(companyWebsite);
+      fetchedPipelineUrl = companyWebsite;
     } catch (e) {
-      console.log(`    [${companyName}] [citeline] website pre-fetch failed: ${e.message}`);
+      console.log(`    [${companyName}] [citeline] pipeline page fetch failed: ${e.message}`);
     }
   }
+
+  const steps345Instruction = thinCoverage && websiteContent
+    ? `THIN COVERAGE — MERGE ASSETS FROM BOTH SOURCES:
+Citeline has limited data for this company (${rows.length} asset(s) above, some may be NDR/Ceased or missing targets). The company pipeline page has been pre-fetched below.
+
+YOUR TASK FOR STEPS 1+2:
+- Start with the Citeline assets listed above as your baseline.
+- Read the website pipeline content carefully and extract ALL additionally named assets not already in Citeline.
+- Build a MERGED asset list combining both sources. For each asset, use whichever source has richer data (phase, targets, modality). Do NOT discard Citeline assets unless the website confirms they are discontinued/withdrawn.
+- Include ALL assets regardless of phase (Discovery, Preclinical, IND-Enabling, Clinical — all count).
+
+Then proceed: Step 3 (competitive overlap) → Steps 4+5 via OneBD for the full merged list.`
+    : `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`;
 
   const messages = [{
     role: 'user',
     content:
       `Screen this company through the Citeline primary track: "${companyName}"\n\n` +
-      `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
+      `CITELINE DATABASE — Steps 1+2 (${rows.length} qualifying oncology biologic asset(s)):\n\n` +
       `${assetLines}\n\n` +
       `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
       (websiteContent
-        ? `COMPANY WEBSITE CONTENT (pre-fetched — thin Citeline coverage):\n${websiteContent}\n\n`
+        ? `PIPELINE PAGE CONTENT (pre-fetched from ${fetchedPipelineUrl}):\n${websiteContent}\n\n`
         : '') +
       steps345Instruction,
   }];
