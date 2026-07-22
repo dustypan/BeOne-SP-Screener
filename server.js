@@ -1623,7 +1623,7 @@ function loadCitelineSpreadsheet() {
   console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineIndex).length} company stems`);
 }
 
-const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
+const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended']);
 
 function citelineGetAssetsLocal(companyName) {
   const needle = stemCompany(companyName);
@@ -2093,7 +2093,10 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
 
   const thinCoverage = rows.length <= 2
     || rows.some(r => !r.targets || r.targets.trim() === '')
-    || rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
+    || rows.every(r =>
+        r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported' ||
+        r.citelinePhase === 'Ceased' || r.status === 'Ceased'
+      );
 
   const assetLines = rows.map((r, i) => {
     const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
