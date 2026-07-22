@@ -1204,25 +1204,34 @@ async function fetchWebpage(url, section) {
 const PIPELINE_LINK_RE = /pipeline|our[- ]science|our[- ]programs?|science|programs?|therapeutics|drug[- ]discovery|r&d|candidates|portfolio/i;
 
 async function findAndFetchPipelinePage(homepageUrl) {
-  try {
-    const res = await axios.get(homepageUrl, {
-      timeout: 15000,
-      maxRedirects: 4,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
-      },
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+  };
+
+  // Helper: fetch a URL and return parsed cheerio + raw text, with a tight timeout
+  async function quickGet(url, timeoutMs) {
+    const res = await axios.get(url, {
+      timeout: timeoutMs, maxRedirects: 4, headers: HEADERS,
       validateStatus: s => s < 400,
     });
-    if (typeof res.data !== 'string') return fetchWebpage(homepageUrl);
-
+    if (typeof res.data !== 'string') return { $: null, text: null };
     const $ = cheerio.load(res.data);
+    $('script,style,nav,footer,header,.nav,.footer,.cookie-banner,iframe,[aria-hidden="true"]').remove();
+    const text = $('body').text().replace(/\s+/g, ' ').trim();
+    return { $: cheerio.load(res.data), text };
+  }
+
+  try {
+    // Step 1 — fetch homepage with 6s budget
+    const { $: $home, text: homeText } = await quickGet(homepageUrl, 6000);
+    if (!$home) return homeText || null;
 
     // Score every <a href> by whether the href path or link text matches pipeline keywords
     const scored = [];
-    $('a[href]').each((_, el) => {
-      const href = $(el).attr('href') || '';
-      const text = ($(el).text() || '').trim();
+    $home('a[href]').each((_, el) => {
+      const href = ($home(el).attr('href') || '').trim();
+      const text = ($home(el).text() || '').trim();
       if (!href || /^(#|mailto:|javascript:|tel:)/.test(href)) return;
       const score =
         (PIPELINE_LINK_RE.test(href) ? 2 : 0) +
@@ -1230,20 +1239,22 @@ async function findAndFetchPipelinePage(homepageUrl) {
       if (score > 0) scored.push({ href, text, score });
     });
 
-    // If no nav links scored (JS-rendered homepage), fall back to plain fetch
+    // No pipeline links found (JS-rendered) — return homepage text as best effort
     if (scored.length === 0) {
-      $('script,style,nav,footer,header,.nav,.footer,.cookie-banner,iframe,[aria-hidden="true"]').remove();
-      const body = $('body').text().replace(/\s+/g, ' ').trim();
-      return body.length > 100 ? body.slice(0, 15000) : fetchWebpage(homepageUrl);
+      return homeText && homeText.length > 100 ? homeText.slice(0, 15000) : null;
     }
 
     scored.sort((a, b) => b.score - a.score);
-    const pipelineUrl = new URL(scored[0].href, homepageUrl).href;
-    console.log(`      [pipeline-finder] → ${pipelineUrl} ("${scored[0].text}", score=${scored[0].score})`);
-    return fetchWebpage(pipelineUrl);
+    const subpageUrl = new URL(scored[0].href, homepageUrl).href;
+    console.log(`      [pipeline-finder] → ${subpageUrl} ("${scored[0].text}", score=${scored[0].score})`);
+
+    // Step 2 — fetch subpage with 7s budget
+    const { text: subText } = await quickGet(subpageUrl, 7000);
+    return subText && subText.length > 100 ? subText.slice(0, 15000) : homeText?.slice(0, 15000) || null;
+
   } catch (e) {
-    // Any error — fall back to plain homepage fetch
-    return fetchWebpage(homepageUrl);
+    // Timeout or fetch error — return null so the caller can decide
+    return null;
   }
 }
 
@@ -2169,29 +2180,45 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
 
   // For thin-coverage companies, pre-fetch the pipeline page so Claude has the
   // full asset list from the website to merge with Citeline data.
-  // Priority: pipelineUrl from spreadsheet → findAndFetchPipelinePage(companyWebsite) fallback.
+  // Priority: pipelineUrl from spreadsheet → findAndFetchPipelinePage(companyWebsite).
+  // Hard cap: 15 seconds total — if both sources are slow, give up and proceed without.
   let websiteContent = null;
   let fetchedPipelineUrl = null;
   if (thinCoverage && (pipelineUrl || companyWebsite)) {
-    if (pipelineUrl) {
-      console.log(`    [${companyName}] [citeline] thin coverage — fetching pipeline URL from spreadsheet: ${pipelineUrl}`);
-      emit('🌐 Thin coverage — fetching pipeline page…');
-      try {
-        websiteContent = await fetchWebpage(pipelineUrl);
-        fetchedPipelineUrl = pipelineUrl;
-      } catch (e) {
-        console.log(`    [${companyName}] [citeline] pipeline URL fetch failed: ${e.message}`);
+    emit('🌐 Thin coverage — fetching pipeline page…');
+    const timeout15s = new Promise(resolve => setTimeout(() => resolve({ content: null, url: null }), 15000));
+
+    const fetchWork = (async () => {
+      // 1. Direct pipeline URL from spreadsheet
+      if (pipelineUrl) {
+        console.log(`    [${companyName}] [citeline] thin-coverage pipeline URL: ${pipelineUrl}`);
+        try {
+          const content = await fetchWebpage(pipelineUrl);
+          if (content && content.length > 100) return { content, url: pipelineUrl };
+        } catch (e) {
+          console.log(`    [${companyName}] [citeline] pipeline URL fetch failed: ${e.message}`);
+        }
       }
-    }
-    if (!websiteContent && companyWebsite) {
-      console.log(`    [${companyName}] [citeline] thin coverage — finding pipeline page from homepage: ${companyWebsite}`);
-      if (!pipelineUrl) emit('🌐 Thin coverage — fetching pipeline page…');
-      try {
-        websiteContent = await findAndFetchPipelinePage(companyWebsite);
-        fetchedPipelineUrl = companyWebsite;
-      } catch (e) {
-        console.log(`    [${companyName}] [citeline] pipeline page fetch failed: ${e.message}`);
+      // 2. Fallback — crawl companyWebsite nav for pipeline/science/drugs page
+      if (companyWebsite) {
+        console.log(`    [${companyName}] [citeline] thin-coverage crawling homepage: ${companyWebsite}`);
+        try {
+          const content = await findAndFetchPipelinePage(companyWebsite);
+          if (content && content.length > 100) return { content, url: companyWebsite };
+        } catch (e) {
+          console.log(`    [${companyName}] [citeline] homepage crawl failed: ${e.message}`);
+        }
       }
+      return { content: null, url: null };
+    })();
+
+    const { content, url } = await Promise.race([fetchWork, timeout15s]);
+    if (content) {
+      websiteContent = content;
+      fetchedPipelineUrl = url;
+      console.log(`    [${companyName}] [citeline] pipeline page fetched (${content.length} chars) from ${url}`);
+    } else {
+      console.log(`    [${companyName}] [citeline] pipeline fetch timed out or empty — proceeding without`);
     }
   }
 
