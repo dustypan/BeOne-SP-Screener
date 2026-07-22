@@ -1645,6 +1645,9 @@ function citelineGetAssetsLocal(companyName) {
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null };
   }
 
+  // Extract company website from spreadsheet (new column)
+  const companyWebsite = matchedRows.find(r => r.companyWebsite)?.companyWebsite || null;
+
   // Filter discontinued, regimens (combination "+" therapies), and qualifying modalities
   const active     = matchedRows.filter(r =>
     !EXCLUDED_STATUSES.has(r.globalStatus) &&
@@ -1658,7 +1661,7 @@ function citelineGetAssetsLocal(companyName) {
     return {
       rows: [],
       coverageStatus: hasQualifyingBiologic ? 'excluded-biologic-no-oncology' : 'excluded-small-molecule',
-      companyWebsite: null,
+      companyWebsite,
       nonQualifyingModalities: allModalities,
     };
   }
@@ -1695,7 +1698,7 @@ function citelineGetAssetsLocal(companyName) {
     allTargets:       r.allTargets     || '',
   }));
 
-  return { rows, coverageStatus: 'qualifying', companyWebsite: null };
+  return { rows, coverageStatus: 'qualifying', companyWebsite };
 }
 
 async function citelineGetAssets(companyName) {
