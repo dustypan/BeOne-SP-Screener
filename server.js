@@ -1709,9 +1709,10 @@ function citelineGetAssetsLocal(companyName) {
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Extract company website and pipeline URL from spreadsheet columns
-  const companyWebsite = matchedRows.find(r => r.companyWebsite)?.companyWebsite || null;
-  const pipelineUrl    = matchedRows.find(r => r.pipelineUrl)?.pipelineUrl       || null;
+  // Extract company website and pipeline URL — treat string "NULL" / "null" / blank as absent
+  const cleanUrl = v => (v && typeof v === 'string' && v.trim() && v.trim().toUpperCase() !== 'NULL') ? v.trim() : null;
+  const companyWebsite = cleanUrl(matchedRows.find(r => r.companyWebsite)?.companyWebsite);
+  const pipelineUrl    = cleanUrl(matchedRows.find(r => r.pipelineUrl)?.pipelineUrl);
 
   // Filter discontinued, regimens (combination "+" therapies), and qualifying modalities
   const active     = matchedRows.filter(r =>
