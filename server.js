@@ -1682,7 +1682,7 @@ function citelineGetAssetsLocal(companyName) {
   const needle = stemCompany(companyName);
 
   if (!needle || needle.length < 3) {
-    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null };
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
   // Stem match: "hanchor bio" = "hanchorbio" = "hanchor therapeutics" → all stem to "hanchor"
@@ -1695,11 +1695,12 @@ function citelineGetAssetsLocal(companyName) {
   }
 
   if (matchedRows.length === 0) {
-    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null };
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Extract company website from spreadsheet (new column)
+  // Extract company website and pipeline URL from spreadsheet columns
   const companyWebsite = matchedRows.find(r => r.companyWebsite)?.companyWebsite || null;
+  const pipelineUrl    = matchedRows.find(r => r.pipelineUrl)?.pipelineUrl       || null;
 
   // Filter discontinued, regimens (combination "+" therapies), and qualifying modalities
   const active     = matchedRows.filter(r =>
@@ -1714,7 +1715,7 @@ function citelineGetAssetsLocal(companyName) {
     return {
       rows: [],
       coverageStatus: hasQualifyingBiologic ? 'excluded-biologic-no-oncology' : 'excluded-small-molecule',
-      companyWebsite,
+      companyWebsite, pipelineUrl,
       nonQualifyingModalities: allModalities,
     };
   }
@@ -1751,7 +1752,7 @@ function citelineGetAssetsLocal(companyName) {
     allTargets:       r.allTargets     || '',
   }));
 
-  return { rows, coverageStatus: 'qualifying', companyWebsite };
+  return { rows, coverageStatus: 'qualifying', companyWebsite, pipelineUrl };
 }
 
 async function citelineGetAssets(companyName) {
@@ -1766,6 +1767,7 @@ async function citelineGetAssets(companyName) {
       rows: result.recordset,
       coverageStatus: 'qualifying',
       companyWebsite: result.recordset[0]?.companyWebsite || null,
+      pipelineUrl: null,
     };
   }
 
@@ -1775,15 +1777,14 @@ async function citelineGetAssets(companyName) {
     .query(CITELINE_MODALITY_CHECK_SQL);
 
   if (checkResult.recordset.length === 0) {
-    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null };
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
   const companyWebsite = checkResult.recordset.find(r => r.companyWebsite)?.companyWebsite || null;
   const modalityRows   = checkResult.recordset.filter(r => r.drugTypeCaption != null);
 
   if (modalityRows.length === 0) {
-    // Company exists in Citeline but has no drug records at all
-    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite };
+    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite, pipelineUrl: null };
   }
 
   const hasQualifyingBiologic = modalityRows.some(r => QUALIFYING_BIOLOGIC_MODALITIES.has(r.drugTypeCaption));
@@ -1791,6 +1792,7 @@ async function citelineGetAssets(companyName) {
     rows: [],
     coverageStatus: hasQualifyingBiologic ? 'excluded-biologic-no-oncology' : 'excluded-small-molecule',
     companyWebsite,
+    pipelineUrl: null,
     nonQualifyingModalities: [...new Set(modalityRows.map(r => r.drugTypeCaption))],
   };
 }
@@ -2120,7 +2122,7 @@ Return ONLY this JSON, nothing else:
 
 async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
   console.log(`    [${companyName}] [citeline] querying Citeline SQL...`);
-  const { rows, coverageStatus, companyWebsite, nonQualifyingModalities } = await citelineGetAssets(companyName);
+  const { rows, coverageStatus, companyWebsite, pipelineUrl, nonQualifyingModalities } = await citelineGetAssets(companyName);
 
   if (coverageStatus !== 'qualifying') {
     if (coverageStatus === 'inconclusive-not-found') {
@@ -2167,16 +2169,29 @@ async function screenWithCitelinePrimary(companyName, client, emit = () => {}) {
 
   // For thin-coverage companies, pre-fetch the pipeline page so Claude has the
   // full asset list from the website to merge with Citeline data.
+  // Priority: pipelineUrl from spreadsheet → findAndFetchPipelinePage(companyWebsite) fallback.
   let websiteContent = null;
   let fetchedPipelineUrl = null;
-  if (thinCoverage && companyWebsite) {
-    console.log(`    [${companyName}] [citeline] thin coverage — finding pipeline page: ${companyWebsite}`);
-    emit('🌐 Thin coverage — fetching pipeline page…');
-    try {
-      websiteContent = await findAndFetchPipelinePage(companyWebsite);
-      fetchedPipelineUrl = companyWebsite;
-    } catch (e) {
-      console.log(`    [${companyName}] [citeline] pipeline page fetch failed: ${e.message}`);
+  if (thinCoverage && (pipelineUrl || companyWebsite)) {
+    if (pipelineUrl) {
+      console.log(`    [${companyName}] [citeline] thin coverage — fetching pipeline URL from spreadsheet: ${pipelineUrl}`);
+      emit('🌐 Thin coverage — fetching pipeline page…');
+      try {
+        websiteContent = await fetchWebpage(pipelineUrl);
+        fetchedPipelineUrl = pipelineUrl;
+      } catch (e) {
+        console.log(`    [${companyName}] [citeline] pipeline URL fetch failed: ${e.message}`);
+      }
+    }
+    if (!websiteContent && companyWebsite) {
+      console.log(`    [${companyName}] [citeline] thin coverage — finding pipeline page from homepage: ${companyWebsite}`);
+      if (!pipelineUrl) emit('🌐 Thin coverage — fetching pipeline page…');
+      try {
+        websiteContent = await findAndFetchPipelinePage(companyWebsite);
+        fetchedPipelineUrl = companyWebsite;
+      } catch (e) {
+        console.log(`    [${companyName}] [citeline] pipeline page fetch failed: ${e.message}`);
+      }
     }
   }
 
