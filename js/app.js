@@ -950,11 +950,11 @@ function renderResults() {
     renderResultsTable();
   };
 
-  // Show screened-out toggle
+  // Exclude screened-out toggle (checked = hide, unchecked = show with red shading)
   const screenedOutToggle = document.getElementById('show-screened-out-toggle');
-  screenedOutToggle.checked = state.showScreenedOut || false;
+  screenedOutToggle.checked = !state.showScreenedOut;
   screenedOutToggle.onchange = e => {
-    state.showScreenedOut = e.target.checked;
+    state.showScreenedOut = !e.target.checked;
     renderResultsTable();
   };
 

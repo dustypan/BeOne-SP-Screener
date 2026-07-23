@@ -1011,9 +1011,9 @@ tr.row-paused td { background: var(--amber-lt); }
 }
 .asset-row:hover { background: var(--gray-50); }
 .asset-row.competitor { background: #fafafa; color: var(--text-muted); }
-.asset-row.asset-screened-out td { background: #fff5f5; }
-@media (prefers-color-scheme: dark) { .asset-row.asset-screened-out td { background: #2d1a1a; } }
-:root[data-theme="dark"] .asset-row.asset-screened-out td { background: #2d1a1a; }
+.asset-row.asset-screened-out td:not(.co-cell) { background: #fff5f5; }
+@media (prefers-color-scheme: dark) { .asset-row.asset-screened-out td:not(.co-cell) { background: #2d1a1a; } }
+:root[data-theme="dark"] .asset-row.asset-screened-out td:not(.co-cell) { background: #2d1a1a; }
 .asset-row.company-first-row > td { border-top: 2px solid var(--gray-300); }
 
 .co-cell {
