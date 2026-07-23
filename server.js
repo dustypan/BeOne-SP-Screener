@@ -1918,34 +1918,44 @@ async function lookupClinicalTrialsForAsset(companyName, assetName) {
   }
 }
 
-// Plan's fixed Indication Synergy keyword list (hematology, lung, GI, breast/gyn).
+// Indication Synergy keyword list — hematology, lung, GI (colorectal/stomach/gallbladder/pancreas),
+// women's cancers (breast/gyn). Prostate is explicitly NOT included.
 const INDICATION_SYNERGY_TERMS = [
+  // Hematology
   'CLL', 'B-CLL', 'SLL', 'WM', 'Waldenstrom', 'Waldenström', 'lymphoplasmacytic lymphoma',
   'FL', 'Follicular Lymphoma', 'MCL', 'Mantle Cell Lymphoma', 'MZL', 'Marginal Zone Lymphoma',
   'MALT lymphoma', 'NHL', 'Non-Hodgkin Lymphoma', 'MM', 'Multiple Myeloma', 'plasma cell myeloma',
   'MDS', 'Myelodysplastic Syndrome', 'myelodysplasia', 'AML', 'Acute Myeloid Leukemia',
   'acute myelogenous leukemia', 'B-cell malignancies',
+  // Lung
   'SCLC', 'Small Cell Lung Cancer', 'small cell lung carcinoma', 'NSCLC',
   'Non-Small Cell Lung Cancer', 'lung adenocarcinoma', 'squamous cell lung carcinoma',
-  'ESCC', 'Esophageal Squamous Cell Carcinoma', 'GC', 'Gastric Cancer', 'stomach cancer',
-  'stomach carcinoma', 'GEJC', 'Gastroesophageal Junction Cancer', 'GEJ cancer', 'GEA',
-  'Gastroesophageal Adenocarcinoma', 'HCC', 'Hepatocellular Carcinoma', 'liver cell carcinoma',
-  'NPC', 'Nasopharyngeal Carcinoma', 'nasopharyngeal cancer', 'UBC', 'Urothelial Bladder Cancer',
-  'bladder urothelial carcinoma', 'transitional cell carcinoma of the bladder', 'MSI-H',
-  'Microsatellite Instability-High', 'MSI-high', 'dMMR', 'Deficient Mismatch Repair',
-  'MMR-deficient', 'BTC', 'Biliary Tract Cancer', 'cholangiocarcinoma', 'bile duct cancer',
-  'gallbladder cancer',
+  // GI — colorectal, stomach, gallbladder, pancreas, esophagus, biliary
+  'CRC', 'colorectal cancer', 'colorectal carcinoma', 'colon cancer', 'rectal cancer',
+  'ESCC', 'Esophageal Squamous Cell Carcinoma', 'esophageal cancer', 'esophageal adenocarcinoma',
+  'GC', 'Gastric Cancer', 'stomach cancer', 'stomach carcinoma',
+  'GEJC', 'Gastroesophageal Junction Cancer', 'GEJ cancer', 'GEA', 'Gastroesophageal Adenocarcinoma',
+  'HCC', 'Hepatocellular Carcinoma', 'liver cell carcinoma',
+  'NPC', 'Nasopharyngeal Carcinoma', 'nasopharyngeal cancer',
+  'BTC', 'Biliary Tract Cancer', 'cholangiocarcinoma', 'bile duct cancer', 'gallbladder cancer',
+  'pancreatic cancer', 'pancreatic ductal adenocarcinoma', 'PDAC', 'pancreatic carcinoma',
+  'MSI-H', 'Microsatellite Instability-High', 'MSI-high', 'dMMR', 'Deficient Mismatch Repair', 'MMR-deficient',
+  // Women's cancers
   'Breast cancer', 'breast carcinoma', 'HER2-positive breast cancer',
   'triple-negative breast cancer', 'TNBC', 'ovarian cancer', 'ovarian carcinoma',
-  'cervical cancer', 'cervical carcinoma', 'endometrial cancer', 'endometrial carcinoma',
-  'uterine cancer',
+  'cervical cancer', 'cervical carcinoma', 'endometrial cancer', 'endometrial carcinoma', 'uterine cancer',
 ];
+
+// Prostate cancer is NOT a BeOne indication synergy focus — strip it before matching
+// so MSI-H prostate or other broad terms don't accidentally trigger the flag.
+const PROSTATE_RE = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function matchesIndicationSynergy(text) {
   if (!text) return false;
-  return INDICATION_SYNERGY_TERMS.some(term => new RegExp(`\\b${escapeRegex(term)}\\b`, 'i').test(text));
+  const stripped = text.replace(PROSTATE_RE, '');
+  return INDICATION_SYNERGY_TERMS.some(term => new RegExp(`\\b${escapeRegex(term)}\\b`, 'i').test(stripped));
 }
 
 function computePhaseSynergy(asset, ctgov) {
@@ -1960,8 +1970,9 @@ function computePhaseSynergy(asset, ctgov) {
   return false;
 }
 
-// Targets that qualify for checkpoint-IO-alt flag
-const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a'];
+// Targets that qualify for checkpoint-IO-alt flag — non-PD-1/PD-L1 checkpoint receptors only.
+// TCEs are excluded (they have their own masked-tce flag). PD-1/PD-L1 combos no longer qualify.
+const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a', 'ox40', 'cd134', '4-1bb', 'cd137', 'icos', 'cd278', 'gitr', 'cd357'];
 
 // Compute flags directly from Steps 1+2 asset data (no web research needed).
 // Called automatically after every screening run — no manual autoflag step required
@@ -1982,11 +1993,11 @@ function computeFlagsFromAsset(asset) {
   if (leadOptTerms.some(t => phase.includes(t))) flags.add('phase-synergy');
   if (phase.includes('2/3') || phase.includes('ii/iii') || phase.includes('2/iii') || phase.includes('ii/3')) flags.add('phase-synergy');
 
-  // Strategic — checkpoint IO alt: non-PD1/PD-L1 checkpoint target, or bsAb/tsAb hitting PD-1/PD-L1
-  const hasPD = targets.some(t => t.includes('pd-1') || t.includes('pd-l1') || t === 'pd1' || t === 'pdl1');
+  // Strategic — checkpoint IO alt: non-PD-1/PD-L1 checkpoint target, non-TCE modality only.
+  // TCEs are excluded (they belong to masked-tce). PD-1/PD-L1 combos no longer qualify.
+  const isTCE = modality === 'tce' || modality.includes('t cell engager') || modality.includes('t-cell engager');
   const hasAltCheckpoint = targets.some(t => CHECKPOINT_ALT_TARGETS.some(c => t.includes(c)));
-  const isBispecificPlus = ['bsab', 'tsab'].includes(modality);
-  if (hasAltCheckpoint || (hasPD && isBispecificPlus)) flags.add('checkpoint-io-alt');
+  if (hasAltCheckpoint && !isTCE) flags.add('checkpoint-io-alt');
 
   // Strategic — 4-1BB arm (TCE or bsAb/tsAb engaging 4-1BB/CD137)
   const has41BB = targets.some(t => t.includes('4-1bb') || t.includes('cd137'));
@@ -1996,10 +2007,20 @@ function computeFlagsFromAsset(asset) {
 }
 
 // Apply auto-flags to all qualifying assets in a screening result and bubble up to company level.
+const CEASED_PHASES = new Set(['ceased', 'discontinued', 'withdrawn', 'suspended', 'terminated', 'no longer pursued']);
+
 function applyAutoFlags(result) {
   if (!result || !result.assets) return result;
   const companyFlags = new Set(result.flags || []);
   for (const asset of result.assets) {
+    // Exclude assets where Claude returned a ceased/discontinued phase
+    if (asset.overallStatus !== 'excluded') {
+      const p = (asset.phase || '').toLowerCase().trim();
+      if (CEASED_PHASES.has(p) || [...CEASED_PHASES].some(c => p.includes(c))) {
+        asset.overallStatus  = 'excluded';
+        asset.excludedReason = `Development ceased (phase: ${asset.phase})`;
+      }
+    }
     const derived = computeFlagsFromAsset(asset);
     asset.flags = derived;
     derived.forEach(f => companyFlags.add(f));
@@ -2031,7 +2052,7 @@ Company website: ${company.website || '(unknown)'}
 Qualifies if ANY of:
 1. masked-tce-4-1bb: a TCE with EITHER a masking/prodrug moiety (TME-cleavable, probody, conditional activation) OR engaging 4-1BB (CD137) as one of its targets.
 2. adc-novel-payload: an ADC using a single payload OTHER than a TOP1 inhibitor (DXd/deruxtecan, SN-38, exatecan) or MMAE — e.g. DM1, DM4, PBD, calicheamicin, tubulysin, cryptophycin — OR a dual payload combination other than MMAE+TOP1.
-3. checkpoint-io-alt: targets a T-cell checkpoint receptor OTHER than PD-1/PD-L1 (LAG-3, TIM-3, TIGIT, CTLA-4, VISTA, BTLA, CD96, NKG2A), OR targets PD-1/PD-L1 IN COMBINATION with another target.
+3. checkpoint-io-alt: targets a non-PD-1/PD-L1 checkpoint receptor (LAG-3, TIM-3, TIGIT, CTLA-4, VISTA, BTLA, CD96, NKG2A, OX40, 4-1BB, ICOS, GITR) AND is NOT a TCE modality. TCEs belong to masked-tce-4-1bb. PD-1/PD-L1 combinations do NOT qualify for this flag.
 
 BUDGET: at most 3 tool calls total. Look at the asset's own science/pipeline page or the
 existing notes above first — only search if the specific molecular detail (payload identity,
