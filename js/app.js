@@ -754,6 +754,16 @@ const TARGET_SYNONYMS = {
   'ErbB2':    'HER2',
   'KK-LC-1':  'CT83',
   'KKLC1':    'CT83',
+  // CD nomenclature → familiar names used by BeOne colleagues
+  'CD137':    '4-1BB',
+  'CD134':    'OX40',
+  'CD278':    'ICOS',
+  'CD279':    'PD-1',
+  'CD274':    'PD-L1',
+  'CD223':    'LAG-3',
+  'CD366':    'TIM-3',
+  'CD152':    'CTLA-4',
+  'CD28':     'CD28',
   'Multiple':                     'Undisclosed',
   'Various':                      'Undisclosed',
   'Unknown':                      'Undisclosed',
@@ -767,20 +777,33 @@ const TARGET_SYNONYMS = {
   'Proprietary Target':           'Undisclosed',
 };
 
+// Mechanism/modality terms that are NOT specific molecular targets —
+// strip these from the target display so Ask 3 shows only real targets.
+const NON_TARGET_TERMS = new Set([
+  'Protein degrader', 'Protein Degrader', 'Protein degradation', 'Protein Degradation',
+  'Tubulin', 'Microtubule', 'Microtubules',
+  'DNA', 'DNA damage', 'Topoisomerase', 'Topoisomerase I', 'Topoisomerase II',
+  'Radiotherapy', 'Chemotherapy', 'Immunotherapy',
+  'mRNA', 'siRNA', 'miRNA',
+  'Fc receptor', 'Fc Receptor',
+]);
+
 function normalizeTarget(t) {
-  if (!t || !t.trim()) return 'Undisclosed';
+  if (!t || !t.trim()) return null;
   const s = t.trim();
-  return TARGET_SYNONYMS[s] || s;
+  if (NON_TARGET_TERMS.has(s)) return null;
+  const mapped = TARGET_SYNONYMS[s];
+  if (mapped === 'Undisclosed') return null;
+  return mapped || s;
 }
 
 // Returns the full target combination as a single string (e.g. "PD-1×IL-2").
 // Targets are normalized, deduped, and sorted so order in the raw data doesn't matter.
 function formatTargetSet(targets) {
   if (!targets || targets.length === 0) return 'Undisclosed';
-  const normalized = [...new Set(targets.map(normalizeTarget))];
-  const known = normalized.filter(t => t !== 'Undisclosed');
-  if (known.length === 0) return 'Undisclosed';
-  return known.sort((a, b) => a.localeCompare(b)).join('×');
+  const normalized = [...new Set(targets.map(normalizeTarget).filter(Boolean))];
+  if (normalized.length === 0) return 'Undisclosed';
+  return normalized.sort((a, b) => a.localeCompare(b)).join('×');
 }
 
 function computeAvailableTargets() {
