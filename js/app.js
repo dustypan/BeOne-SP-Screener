@@ -889,14 +889,8 @@ function recomputeWizardFilter() {
 
   result = result.filter(c => state.beoneReviews[c.id] !== 'negative');
 
-  if (!state.anyTarget && state.selectedTargetIds.size > 0) {
-    result = result.filter(c =>
-      (c.assets || []).some(a => {
-        if (a.overallStatus === 'excluded') return false;
-        return state.selectedTargetIds.has(formatTargetSet(a.targets));
-      })
-    );
-  }
+  // Target filter: companies stay in — individual assets with deselected targets
+  // are red-shaded inline (like screened-out assets) rather than hiding the company.
 
   state.wizardFiltered = result;
   updateRemainingCount();
@@ -975,12 +969,20 @@ function renderResults() {
   renderInconclusivesFooter();
 }
 
+function isAssetTargetFiltered(a) {
+  if (state.anyTarget || state.selectedTargetIds.size === 0) return false;
+  if (a.overallStatus === 'excluded') return false; // already screened out — don't double-flag
+  return !state.selectedTargetIds.has(formatTargetSet(a.targets));
+}
+
 function getFilteredAssets(company) {
   return (company.assets || []).filter(a => {
     // Step 4 (rights) and Step 5 (manufacturing) excluded assets always shown — red shading inline
     if (a.overallStatus === 'excluded' && a.layer4 && a.layer4.status === 'fail') return true;
     if (a.overallStatus === 'excluded' && a.layer5 && a.layer5.status === 'fail') return true;
     if (a.overallStatus === 'excluded' && !state.showScreenedOut) return false;
+    // Assets with a deselected target are hidden when "exclude screened-out" is on
+    if (isAssetTargetFiltered(a) && !state.showScreenedOut) return false;
     if (state.hidingCompetitors && a.layer3 && a.layer3.status === 'fail') return false;
     return true;
   });
@@ -1046,14 +1048,16 @@ function renderResultsTable() {
       const allFlags = [...new Set([...companyFlags, ...assetFlags])];
       const isCompetitor = a.layer3 && a.layer3.status === 'fail';
       const isScreenedOut = a.overallStatus === 'excluded';
+      const isTargetFiltered = isAssetTargetFiltered(a);
+      const isRedRow = isScreenedOut || isTargetFiltered;
       const screenedOutInfo = isScreenedOut ? getScreenedOutReason(a) : null;
       const rowId = `row-${c.id}-${idx}`;
       const detailId = `detail-${c.id}-${idx}`;
 
-      if (!isScreenedOut) totalAssetRows++;
+      if (!isRedRow) totalAssetRows++;
 
       html += `
-        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isScreenedOut ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
+        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isRedRow ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
           ${isFirst ? `
             <td class="co-cell" rowspan="${rowspan}">
               <span class="qualifying-badge" title="Qualifies for BeOne partnership outreach">✓</span>
@@ -1077,6 +1081,7 @@ function renderResultsTable() {
             ${escHtml(a.name || (a.isPlatform ? '[Platform]' : '—'))}
             ${isCompetitor ? '<span class="comp-tag">competitor</span>' : ''}
             ${isScreenedOut && screenedOutInfo ? `<span class="screened-out-tag">${escHtml(screenedOutInfo.step)}</span>` : ''}
+            ${isTargetFiltered ? `<span class="screened-out-tag">Target filtered</span>` : ''}
           </td>
           <td><span class="mod-tag mod-${(a.modality || '').toLowerCase().replace(/[^a-z]/g,'')}">${escHtml(a.modality || '—')}</span></td>
           <td class="targets-cell">${(a.targets || []).length ? (a.targets || []).map(t => `<span class="tgt-tag">${escHtml(t)}</span>`).join('') : '<span class="undisclosed">Undisclosed</span>'}</td>
@@ -1085,10 +1090,12 @@ function renderResultsTable() {
           <td class="flags-cell">
             ${isScreenedOut && screenedOutInfo
               ? `<span class="screened-out-reason">${escHtml(screenedOutInfo.reason)}</span>`
-              : `<div class="flags-inner">
-                  ${renderFlagBadges(allFlags)}
-                  <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
-                </div>`
+              : isTargetFiltered
+                ? `<span class="screened-out-reason">Target not selected in Ask 3 filter</span>`
+                : `<div class="flags-inner">
+                    ${renderFlagBadges(allFlags)}
+                    <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
+                  </div>`
             }
           </td>
         </tr>
