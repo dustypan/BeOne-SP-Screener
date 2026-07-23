@@ -19,7 +19,7 @@ const BEONE_PIPELINE = [
 
 
 const FLAG_DEFS = {
-  'masked-tce-4-1bb':    { label: 'Masked TCE / 4-1BB TCE',     category: 'Strategic Synergy',  color: 'green'  },
+  'masked-tce-4-1bb':    { label: 'Masked TCE',                  category: 'Strategic Synergy',  color: 'green'  },
   'adc-novel-payload':   { label: 'ADC Novel Payload',           category: 'Strategic Synergy',  color: 'green'  },
   'checkpoint-io-alt':   { label: 'Checkpoint IO Alternative',   category: 'Strategic Synergy',  color: 'green'  },
   'indication-synergy':  { label: 'Indication Synergy',          category: 'Indication Synergy', color: 'red'    },
