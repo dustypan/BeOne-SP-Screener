@@ -30,43 +30,51 @@ const state = {
 
   // Current screening run (DB-backed)
   currentRunId: null,
-
-  // Run console — accumulates log lines during a screening run
-  runLog: [],
-  runLogOpen: false,
 };
 
 // ──────────────────────────────────────────────────────────────
 // Persistence (localStorage)
 // ──────────────────────────────────────────────────────────────
 
-// ───────────────────────────────────────────────────────────────
-// Run Console — global log visible on any section
-// ───────────────────────────────────────────────────────────────
+// ── API Key ────────────────────────────────────────────────────
 
-function appendToRunLog(line) {
-  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-  state.runLog.push(`[${ts}] ${line}`);
-  if (state.runLogOpen) {
-    const pre = document.getElementById('console-modal-log');
-    if (pre) { pre.textContent = state.runLog.join('\n'); pre.scrollTop = pre.scrollHeight; }
+function getApiKey() {
+  return localStorage.getItem('beone-api-key') || '';
+}
+
+function initApiKey() {
+  const input    = document.getElementById('api-key-input');
+  const saveBtn  = document.getElementById('api-key-save-btn');
+  const statusEl = document.getElementById('api-key-status');
+  if (!input) return;
+
+  const saved = getApiKey();
+  if (saved) {
+    input.value = saved;
+    statusEl.textContent = 'Key saved ✓';
+    statusEl.className = 'api-key-status saved';
   }
+
+  saveBtn.addEventListener('click', () => {
+    const key = input.value.trim();
+    if (!key) {
+      localStorage.removeItem('beone-api-key');
+      statusEl.textContent = 'Key cleared';
+      statusEl.className = 'api-key-status missing';
+      return;
+    }
+    if (!key.startsWith('sk-ant-')) {
+      statusEl.textContent = 'Does not look like an Anthropic key (should start with sk-ant-)';
+      statusEl.className = 'api-key-status missing';
+      return;
+    }
+    localStorage.setItem('beone-api-key', key);
+    statusEl.textContent = 'Key saved ✓';
+    statusEl.className = 'api-key-status saved';
+  });
 }
 
-function openRunConsole() {
-  state.runLogOpen = true;
-  const log = state.runLog.length ? state.runLog.join('\n') : '(No run started yet — press Run Screener to begin)';
-  const modal = document.getElementById('console-modal');
-  document.getElementById('console-modal-title').textContent = 'Run Console';
-  document.getElementById('console-modal-log').textContent = log;
-  const pre = document.getElementById('console-modal-log');
-  pre.scrollTop = pre.scrollHeight;
-  modal.classList.remove('hidden');
-  const close = () => { state.runLogOpen = false; modal.classList.add('hidden'); };
-  document.getElementById('close-console-btn').onclick = close;
-  document.getElementById('console-modal-overlay').onclick = close;
-}
-
+// ───────────────────────────────────────────────────────────────
 
 function loadPersisted() {
   try {
@@ -248,8 +256,6 @@ async function runScreener(names) {
   bar.style.width = '0%';
   bar.classList.add('progress-starting');
   label.textContent = 'Starting…';
-  state.runLog = [];
-  appendToRunLog(`Run started — ${names.length} compan${names.length === 1 ? 'y' : 'ies'} to screen`);
 
   // Create a run record in the DB to track this session
   state.currentRunId = null;
@@ -265,50 +271,30 @@ async function runScreener(names) {
     }
   } catch (_) {}
 
-  // Open an SSE stream for a screening job and resolve with the result JSON.
-  // The server sends a heartbeat every 20 s so the proxy never issues a 502,
-  // then fires a 'result' event when the job is done.
-  function streamScreenJob(jobId) {
-    return new Promise((resolve, reject) => {
-      const es = new EventSource(`/api/screen/${jobId}/events`);
-      let settled = false;
-      es.addEventListener('progress', e => {
-        try {
-          const { line } = JSON.parse(e.data);
-          appendToRunLog('  ↳ ' + line);
-        } catch {}
-      });
-      es.addEventListener('result', e => {
-        if (settled) return; settled = true;
-        es.close();
-        try { resolve(JSON.parse(e.data)); }
-        catch (err) { reject(new Error('Invalid JSON from server')); }
-      });
-      es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED && !settled) {
-          settled = true; es.close();
-          reject(new Error('SSE connection closed before result'));
-        }
-      };
-    });
-  }
-
   async function screenOne(i) {
     const name = names[i];
 
-    // Screen fresh — start job then stream result via SSE (avoids proxy 502)
-    appendToRunLog(`▶ ${name} — screening started`);
+    // Use cached result from data.js if available
+    const cached = resolveCompany(name);
+    if (cached.status !== 'inconclusive' || cached.inconclusiveReason !== 'Not yet screened') {
+      // Already screened — use cached
+      if (state.beoneReviews[cached.id] != null) {
+        cached.beoneOutcome = state.beoneReviews[cached.id];
+        cached.beoneAnalyzed = true;
+      }
+      companies[i] = cached;
+    } else {
+      // Not yet screened — call the server
       try {
-        const startResp = await fetch('/api/screen', {
+        const resp = await fetch('/api/screen', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
           body: JSON.stringify({ company: name, runId: state.currentRunId }),
         });
 
-        if (!startResp.ok) throw new Error(`Server returned ${startResp.status}`);
+        if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
 
-        const { jobId } = await startResp.json();
-        const result = await streamScreenJob(jobId);
+        const result = await resp.json();
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -322,53 +308,7 @@ async function runScreener(names) {
         }
 
         companies[i] = result;
-        // Log enriched result to run console
-        const assetCount = (result.assets || []).length;
-        const statusIcon = result.status === 'qualifying' ? '✓' : result.status === 'excluded' ? '✗' : '⚠';
-        appendToRunLog(`${statusIcon} ${name} — ${result.status.toUpperCase()} | ${assetCount} asset(s)`);
-        // Asset-by-asset layer breakdown
-        (result.assets || []).forEach((a, idx) => {
-          const aName = a.name || `Asset ${idx + 1}`;
-          const layers = ['layer1','layer2','layer3','layer4','layer5'];
-          const layerStr = layers.map(l => {
-            if (!a[l]) return null;
-            const icon = a[l].status === 'pass' ? '✓' : a[l].status === 'fail' ? '✗' : '~';
-            return `${l.replace('layer','L')}${icon}`;
-          }).filter(Boolean).join(' ');
-          const modality = a.modality ? ` [${a.modality}]` : '';
-          const targets = (a.targets || []).length ? ` → ${a.targets.join('/')}` : '';
-          appendToRunLog(`  └ ${aName}${modality}${targets} | ${layerStr}`);
-          // First failing layer reason
-          for (const l of layers) {
-            if (a[l] && a[l].status === 'fail' && a[l].reason) {
-              appendToRunLog(`    └ Excluded at ${l.replace('layer','L')}: ${a[l].reason}`);
-              break;
-            }
-          }
-        });
-        // Deals
-        if ((result.deals || []).length) {
-          appendToRunLog(`  💰 ${result.deals.length} deal(s) found:`);
-          result.deals.forEach(d => {
-            const partner = d.partner || d.partnerName || '';
-            const type = d.type || d.dealType || '';
-            const year = d.year || d.date || '';
-            appendToRunLog(`    • ${[partner, type, year].filter(Boolean).join(' | ')}`);
-          });
-        }
-        // Sources consulted
-        const sources = result.sources || result.externalSources || [];
-        if (sources.length) {
-          const srcNames = sources.slice(0, 4).map(s => s.source || s.name || s).filter(Boolean);
-          if (srcNames.length) appendToRunLog(`  🔗 Sources: ${srcNames.join(', ')}`);
-        }
-        // Screener rationale (first 2 non-empty lines)
-        if (result.screenerLog) {
-          const lines = result.screenerLog.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 2);
-          lines.forEach(l => appendToRunLog(`  └ ${l}`));
-        }
       } catch (err) {
-        appendToRunLog(`✗ ${name} — ERROR: ${err.message}`);
         // Server not running or network error
         const isConnectionError = err.message.includes('fetch') || err.message.includes('Failed') || err.message.includes('NetworkError');
         companies[i] = {
@@ -389,6 +329,7 @@ async function runScreener(names) {
           researchNotes: '',
         };
       }
+    }
 
     completed++;
     bar.classList.remove('progress-starting');
@@ -418,7 +359,6 @@ function finishScreening(companies) {
   state.companies = companies;
   state.categories = categorize(companies);
   state.wizardFiltered = [...state.categories.qualifying];
-  state._flagsDoneForRun = false; // allow auto-flag to run once when results open
 
   renderSummary();
   showSection('section-summary');
@@ -435,16 +375,9 @@ function renderSummary() {
   setCount('count-excluded', excluded.length);
   setCount('count-inconclusive', inconclusive.length);
 
-  renderBucketList('list-qualifying', qualifying, c => {
-    const total = (c.assets || []).length;
-    const qual  = (c.assets || []).filter(a =>
-      a.overallStatus !== 'excluded' &&
-      (!a.layer3 || a.layer3.status !== 'fail') &&
-      (!a.layer4 || a.layer4.status === 'pass') &&
-      (!a.layer5 || a.layer5.status === 'pass')
-    ).length;
-    return total > qual ? `${qual}/${total} qualifying` : `${qual} qualifying`;
-  });
+  renderBucketList('list-qualifying', qualifying, c =>
+    `${(c.assets || []).filter(a => !a.layer3 || a.layer3.status !== 'fail').length} asset(s) qualifying`
+  );
   renderBucketList('list-excluded', excluded, c => {
     const at = c.excludedAt ? ` (Layer ${c.excludedAt.replace('layer', '')})` : c.excludedAt === 'pre-filter' ? ' (Pre-filter)' : '';
     return (c.excludedReason || 'Screened out') + at;
@@ -648,7 +581,7 @@ async function continueCompanyScreening(companyId) {
   try {
     const resp = await fetch('/api/screen/resume', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
       body: JSON.stringify({
         company: company.name,
         runId: state.currentRunId,
@@ -698,9 +631,9 @@ async function runRescreening() {
     const notFoundInPharmcube = /not found in pharmcube/i.test(company.inconclusiveReason || '');
     const skipPharmcube = notFoundInPharmcube;
     try {
-      const startResp = await fetch('/api/screen', {
+      const resp = await fetch('/api/screen', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
         body: JSON.stringify({
           company: company.name,
           runId: state.currentRunId,
@@ -708,9 +641,8 @@ async function runRescreening() {
           skipPharmcube,
         }),
       });
-      if (!startResp.ok) throw new Error(`Server returned ${startResp.status}`);
-      const { jobId } = await startResp.json();
-      const result = await streamScreenJob(jobId);
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      const result = await resp.json();
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -822,6 +754,16 @@ const TARGET_SYNONYMS = {
   'ErbB2':    'HER2',
   'KK-LC-1':  'CT83',
   'KKLC1':    'CT83',
+  // CD nomenclature → familiar names used by BeOne colleagues
+  'CD137':    '4-1BB',
+  'CD134':    'OX40',
+  'CD278':    'ICOS',
+  'CD279':    'PD-1',
+  'CD274':    'PD-L1',
+  'CD223':    'LAG-3',
+  'CD366':    'TIM-3',
+  'CD152':    'CTLA-4',
+  'CD28':     'CD28',
   'Multiple':                     'Undisclosed',
   'Various':                      'Undisclosed',
   'Unknown':                      'Undisclosed',
@@ -835,20 +777,33 @@ const TARGET_SYNONYMS = {
   'Proprietary Target':           'Undisclosed',
 };
 
+// Mechanism/modality terms that are NOT specific molecular targets —
+// strip these from the target display so Ask 3 shows only real targets.
+const NON_TARGET_TERMS = new Set([
+  'Protein degrader', 'Protein Degrader', 'Protein degradation', 'Protein Degradation',
+  'Tubulin', 'Microtubule', 'Microtubules',
+  'DNA', 'DNA damage', 'Topoisomerase', 'Topoisomerase I', 'Topoisomerase II',
+  'Radiotherapy', 'Chemotherapy', 'Immunotherapy',
+  'mRNA', 'siRNA', 'miRNA',
+  'Fc receptor', 'Fc Receptor',
+]);
+
 function normalizeTarget(t) {
-  if (!t || !t.trim()) return 'Undisclosed';
+  if (!t || !t.trim()) return null;
   const s = t.trim();
-  return TARGET_SYNONYMS[s] || s;
+  if (NON_TARGET_TERMS.has(s)) return null;
+  const mapped = TARGET_SYNONYMS[s];
+  if (mapped === 'Undisclosed') return null;
+  return mapped || s;
 }
 
 // Returns the full target combination as a single string (e.g. "PD-1×IL-2").
 // Targets are normalized, deduped, and sorted so order in the raw data doesn't matter.
 function formatTargetSet(targets) {
   if (!targets || targets.length === 0) return 'Undisclosed';
-  const normalized = [...new Set(targets.map(normalizeTarget))];
-  const known = normalized.filter(t => t !== 'Undisclosed');
-  if (known.length === 0) return 'Undisclosed';
-  return known.sort((a, b) => a.localeCompare(b)).join('×');
+  const normalized = [...new Set(targets.map(normalizeTarget).filter(Boolean))];
+  if (normalized.length === 0) return 'Undisclosed';
+  return normalized.sort((a, b) => a.localeCompare(b)).join('×');
 }
 
 function computeAvailableTargets() {
@@ -859,7 +814,11 @@ function computeAvailableTargets() {
       targets.add(formatTargetSet(a.targets));
     }
   }
-  return Array.from(targets).filter(t => t !== 'Undisclosed').sort((a, b) => a.localeCompare(b));
+  return Array.from(targets).sort((a, b) => {
+    if (a === 'Undisclosed') return 1;
+    if (b === 'Undisclosed') return -1;
+    return a.localeCompare(b);
+  });
 }
 
 function renderAsk3() {
@@ -1007,17 +966,11 @@ function renderResults() {
     showSection('section-wizard');
   };
 
-  // Run Console button
-  const consoleBtn = document.getElementById('run-console-btn');
-  if (consoleBtn) consoleBtn.onclick = openRunConsole;
-
-  // Auto-run flags when results are first shown (once per run)
-  if (!state._flagsDoneForRun) {
-    state._flagsDoneForRun = true;
-    setTimeout(() => runAutoFlag(), 800);
-  }
+  // Auto-flag high priority assets
+  document.getElementById('autoflag-btn').onclick = runAutoFlag;
 
   renderResultsTable();
+  renderAllExcludedSection();
   renderExcludedFooter();
   renderInconclusivesFooter();
 }
@@ -1047,7 +1000,13 @@ function renderResultsTable() {
   const tbody = document.getElementById('results-tbody');
   const query = state.searchQuery.toLowerCase();
 
+  // Companies where ALL non-competitor assets are excluded go to the all-excluded section
+  const hasQualifyingAsset = c => (c.assets || []).some(a =>
+    a.overallStatus !== 'excluded' && !(a.layer3 && a.layer3.status === 'fail')
+  );
+
   const companies = state.wizardFiltered.filter(c => {
+    if (!hasQualifyingAsset(c)) return false;
     if (!query) return true;
     if (c.name.toLowerCase().includes(query)) return true;
     return (c.assets || []).some(a => (a.name || '').toLowerCase().includes(query));
@@ -1097,9 +1056,9 @@ function renderResultsTable() {
         <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isScreenedOut ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
           ${isFirst ? `
             <td class="co-cell" rowspan="${rowspan}">
+              <span class="qualifying-badge" title="Qualifies for BeOne partnership outreach">✓</span>
               <div class="co-cell-inner">
                 <strong class="co-name">${escHtml(c.name)}</strong>
-                <span class="qualifying-check-badge" title="Qualifying company">&#10003; Qualifying</span>
                 ${c.type ? `<span class="type-badge ${c.type}">${c.type === 'public' ? 'Public' : 'Private'}</span>` : ''}
                 ${c.recallTrack ? `<span class="recall-badge" title="Served from repository — last screened ${(c.lastScreenedAt || '').slice(0,10)}">🔄 Recall</span>` : ''}
                 ${c.website ? `<a class="co-cell-btn" href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '📋 10-K' : '🌐 Pipeline'}</a>` : ''}
@@ -1300,6 +1259,49 @@ function renderAssetDetail(company, asset) {
   `;
 }
 
+function renderAllExcludedSection() {
+  const section = document.getElementById('all-excluded-footer');
+  const tbody = document.getElementById('all-excluded-tbody');
+  if (!section || !tbody) return;
+
+  const hasQualifyingAsset = c => (c.assets || []).some(a =>
+    a.overallStatus !== 'excluded' && !(a.layer3 && a.layer3.status === 'fail')
+  );
+
+  const allExcluded = (state.wizardFiltered || []).filter(c => !hasQualifyingAsset(c));
+
+  if (allExcluded.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+
+  tbody.innerHTML = allExcluded.map(c => {
+    const reasons = [];
+    const l4 = (c.assets || []).filter(a => a.layer4 && a.layer4.status === 'fail');
+    const l5 = (c.assets || []).filter(a => a.layer5 && a.layer5.status === 'fail');
+    if (l4.length) {
+      const uniq = [...new Set(l4.map(a => a.layer4.reason).filter(Boolean))];
+      reasons.push('Rights out-licensed (Step 4)' + (uniq.length ? ': ' + uniq[0] : ''));
+    }
+    if (l5.length) {
+      const uniq = [...new Set(l5.map(a => a.layer5.reason).filter(Boolean))];
+      reasons.push('US mfg confirmed (Step 5)' + (uniq.length ? ': ' + uniq[0] : ''));
+    }
+    if (!reasons.length) {
+      const any = (c.assets || []).find(a => a.overallStatus === 'excluded');
+      reasons.push(any ? (any.excludedReason || 'All assets excluded') : 'All assets excluded');
+    }
+    return `
+      <tr>
+        <td><span class="all-excluded-badge" title="All assets excluded">✗</span> <strong>${escHtml(c.name)}</strong></td>
+        <td>${(c.assets || []).length}</td>
+        <td>${escHtml(reasons.join('; '))}</td>
+      </tr>`;
+  }).join('');
+}
+
 function renderExcludedFooter() {
   const section = document.getElementById('excluded-footer');
   const tbody = document.getElementById('excluded-tbody');
@@ -1333,14 +1335,11 @@ function renderExcludedFooter() {
     } else if (c.website) {
       sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
     }
-    const layerLabel = c.excludedAt === 'pre-filter' ? 'Pre-filter'
-      : c.excludedAt ? `Step ${c.excludedAt.replace(/^(step|layer)s?\s*/i, '')}` : '—';
-    const rationale = c.excludedReason || '—';
     return `
       <tr>
-        <td><span class="excluded-x-badge" title="All assets excluded">✗</span> ${escHtml(c.name)}</td>
-        <td>${layerLabel}</td>
-        <td class="excluded-rationale">${escHtml(rationale)}</td>
+        <td>${escHtml(c.name)}</td>
+        <td>${escHtml(c.excludedAt || '—')}</td>
+        <td>${escHtml(c.excludedReason || '—')}</td>
         <td>${sourceLink}</td>
         <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
         <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
@@ -1372,6 +1371,52 @@ function renderExcludedFooter() {
     btn.addEventListener('click', () => openSourcesModal(btn.dataset.coId));
   });
 
+  // Manufacturing-excluded assets sub-section (step5 / layer4 failures across all companies)
+  const mfgExcluded = [];
+  for (const co of (state.companies || [])) {
+    for (const a of (co.assets || [])) {
+      if (a.layer4 && a.layer4.status === 'fail') {
+        mfgExcluded.push({ co, a });
+      }
+    }
+  }
+
+  let mfgSection = document.getElementById('mfg-excluded-section');
+  if (!mfgSection) {
+    mfgSection = document.createElement('div');
+    mfgSection.id = 'mfg-excluded-section';
+    section.appendChild(mfgSection);
+  }
+
+  if (mfgExcluded.length === 0) {
+    mfgSection.innerHTML = '';
+  } else {
+    const mfgRows = mfgExcluded.map(({ co, a }) => {
+      const src = a.layer4.source
+        ? `<a href="${escHtml(a.layer4.source)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`
+        : '—';
+      return `<tr>
+        <td>${escHtml(co.name)}</td>
+        <td>${escHtml(a.name || '—')}</td>
+        <td>${escHtml(a.modality || '—')}</td>
+        <td>${escHtml((a.targets || []).join(', ') || '—')}</td>
+        <td>${escHtml(a.layer4.reason || 'US manufacturing confirmed')}</td>
+        <td>${src}</td>
+      </tr>`;
+    }).join('');
+
+    mfgSection.innerHTML = `
+      <h4 class="mfg-excluded-heading">Assets excluded at manufacturing (Step 5)</h4>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead><tr>
+            <th>Company</th><th>Asset</th><th>Modality</th>
+            <th>Target(s)</th><th>Reason</th><th>Source</th>
+          </tr></thead>
+          <tbody>${mfgRows}</tbody>
+        </table>
+      </div>`;
+  }
 }
 
 function openConsoleModal(name, log) {
@@ -1449,15 +1494,26 @@ function renderInconclusivesFooter() {
 // ──────────────────────────────────────────────────────────────
 
 async function runAutoFlag() {
+  const btn = document.getElementById('autoflag-btn');
+  const statusEl = document.getElementById('autoflag-status');
   const companies = state.wizardFiltered;
-  if (companies.length === 0) return;
+
+  statusEl.classList.remove('hidden');
+
+  if (companies.length === 0) {
+    statusEl.textContent = 'No qualifying companies to flag.';
+    return;
+  }
+
+  btn.disabled = true;
   let done = 0;
 
   for (const company of companies) {
+    statusEl.textContent = `Flagging ${done + 1} of ${companies.length}: ${company.name}…`;
     try {
       const resp = await fetch('/api/autoflag', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
         body: JSON.stringify({ company }),
       });
 
@@ -1484,7 +1540,8 @@ async function runAutoFlag() {
     renderResultsTable();
   }
 
-  renderResultsTable();
+  statusEl.textContent = `Done — flagged ${done} of ${companies.length} compan${companies.length === 1 ? 'y' : 'ies'}.`;
+  btn.disabled = false;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1680,18 +1737,16 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
   btn.textContent = '⏳ Running…';
 
   try {
-    const startResp = await fetch('/api/screen/website-track', {
+    const resp = await fetch('/api/screen/website-track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companyName: company.name, websiteUrl: websiteUrl || company.website || '' }),
     });
-    if (!startResp.ok) {
-      const err = await startResp.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${startResp.status}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
     }
-    const { jobId: wtJobId } = await startResp.json();
-    const result = await streamScreenJob(wtJobId);
-    if (result.error) throw new Error(result.error);
+    const result = await resp.json();
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {
@@ -2091,10 +2146,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   loadPersisted();
+  initApiKey();
   initUpload();
-  // Global floating console button
-  const gcb = document.getElementById('global-console-btn');
-  if (gcb) gcb.addEventListener('click', openRunConsole);
   initColumnPicker();
   initSummary();
   initWizard();
