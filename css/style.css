@@ -788,6 +788,9 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .radio-label input[type=radio] { accent-color: var(--navy); }
@@ -975,7 +978,6 @@ tr.row-paused td { background: var(--amber-lt); }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   border: 1px solid var(--gray-200);
-  overflow: hidden;
   overflow-x: auto;
 }
 
