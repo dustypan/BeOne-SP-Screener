@@ -801,9 +801,9 @@ a:hover { text-decoration: underline; }
 /* Ask 4 URL input */
 .url-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
   background: var(--gray-50);
   border: 1px solid var(--gray-200);
   border-radius: 6px;
@@ -811,10 +811,15 @@ a:hover { text-decoration: underline; }
 }
 
 .url-company {
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 180px;
-  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.url-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .url-input {

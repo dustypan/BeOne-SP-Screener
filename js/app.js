@@ -521,19 +521,20 @@ function renderAsk1() {
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
-      <span class="url-reason">${escHtml(c.inconclusiveReason || 'Not found in Citeline database')}</span>
       ${needsWebsiteInput
         ? `<span class="url-note">↗ Paste <strong>pipeline page URL</strong> (preferred) or company website below</span>`
         : /website unreadable/i.test(c.inconclusiveReason || '')
           ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL or skip</span>`
-          : ''}
-      <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
-        value="${escHtml(state.websiteInputs[c.id] || '')}"
-        data-id="${escHtml(c.id)}"
-        ${isSkipped ? 'disabled' : ''}>
-      <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">
-        ${isSkipped ? '↩ Unskip' : 'Skip'}
-      </button>
+          : `<span class="url-reason">${escHtml(c.inconclusiveReason || 'Not found in Citeline database')}</span>`}
+      <div class="url-input-row">
+        <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
+          value="${escHtml(state.websiteInputs[c.id] || '')}"
+          data-id="${escHtml(c.id)}"
+          ${isSkipped ? 'disabled' : ''}>
+        <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">
+          ${isSkipped ? '↩ Unskip' : 'Skip'}
+        </button>
+      </div>
     </div>`;
   }).join('');
 
