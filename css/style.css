@@ -309,37 +309,6 @@ a:hover { text-decoration: underline; }
 
 .criteria-list li strong { color: var(--navy-mid); font-weight: 600; }
 
-/* Console float button — shown on loading + homepage sections */
-.global-console-fab {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
-  background: var(--navy);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,.18);
-  transition: background .15s, box-shadow .15s;
-  letter-spacing: .2px;
-}
-.global-console-fab:hover {
-  background: var(--navy-mid);
-  box-shadow: 0 6px 20px rgba(0,0,0,.24);
-}
-
-/* How to Use — grid so all descriptions left-align */
-.how-list li {
-  display: grid;
-  grid-template-columns: 14px 86px 1fr;
-  gap: 0 7px;
-  align-items: baseline;
-}
-
 .upload-intro h2 {
   font-size: 22px;
   font-weight: 700;
@@ -788,9 +757,6 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
-  position: sticky;
-  top: 0;
-  z-index: 10;
 }
 
 .radio-label input[type=radio] { accent-color: var(--navy); }
@@ -801,9 +767,9 @@ a:hover { text-decoration: underline; }
 /* Ask 4 URL input */
 .url-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
   background: var(--gray-50);
   border: 1px solid var(--gray-200);
   border-radius: 6px;
@@ -811,15 +777,10 @@ a:hover { text-decoration: underline; }
 }
 
 .url-company {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.url-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 180px;
+  flex-shrink: 0;
 }
 
 .url-input {
@@ -983,6 +944,7 @@ tr.row-paused td { background: var(--amber-lt); }
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   border: 1px solid var(--gray-200);
+  overflow: hidden;
   overflow-x: auto;
 }
 
@@ -1016,12 +978,13 @@ tr.row-paused td { background: var(--amber-lt); }
 }
 .asset-row:hover { background: var(--gray-50); }
 .asset-row.competitor { background: #fafafa; color: var(--text-muted); }
-.asset-row.asset-screened-out td:not(.co-cell) { background: #fff5f5; }
-@media (prefers-color-scheme: dark) { .asset-row.asset-screened-out td:not(.co-cell) { background: #2d1a1a; } }
-:root[data-theme="dark"] .asset-row.asset-screened-out td:not(.co-cell) { background: #2d1a1a; }
+.asset-row.asset-screened-out td { background: #fff5f5; }
+@media (prefers-color-scheme: dark) { .asset-row.asset-screened-out td { background: #2d1a1a; } }
+:root[data-theme="dark"] .asset-row.asset-screened-out td { background: #2d1a1a; }
 .asset-row.company-first-row > td { border-top: 2px solid var(--gray-300); }
 
 .co-cell {
+  position: relative;
   padding: 10px 14px;
   vertical-align: top;
   border-right: 1px solid var(--gray-100);
@@ -1224,6 +1187,28 @@ tr.row-paused td { background: var(--amber-lt); }
 .deal-badge-collab  { background: #f0fdf4; color: #16a34a; }
 .deal-badge-option  { background: #fdf4ff; color: #7c3aed; }
 .deal-badge-other   { background: var(--gray-100); color: var(--gray-600); }
+
+/* ── Qualifying / All-Excluded badges ───────────────────────── */
+.qualifying-badge {
+  position: absolute; top: 7px; right: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #dcfce7; color: #16a34a; border: 2px solid #86efac;
+  font-size: 13px; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  pointer-events: none;
+}
+.all-excluded-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fef2f2; color: #dc2626; border: 1.5px solid #fca5a5;
+  font-size: 12px; font-weight: 700; line-height: 1;
+  margin-right: 5px; vertical-align: middle; flex-shrink: 0;
+}
+.all-excluded-heading {
+  font-size: 15px; font-weight: 700; color: #dc2626;
+  margin: 28px 0 10px;
+}
 
 .no-flags { color: var(--gray-400); font-size: 12px; }
 
@@ -2033,84 +2018,4 @@ details[open] > .evidence-snapshots-header::before { content: '▼ '; }
   padding: 8px 14px;
   background: var(--gray-50);
   color: var(--text-muted);
-}
-
-/* Qualifying check badge */
-.qualifying-check-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: #dcfce7;
-  color: #16a34a;
-  border: 1px solid #bbf7d0;
-  border-radius: 4px;
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 1px 6px;
-  margin-left: 2px;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-/* Excluded X badge */
-.excluded-x-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--red-lt);
-  color: var(--red);
-  border: 1px solid #fecaca;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 5px;
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-/* Rationale cell */
-.excluded-rationale {
-  font-size: 12px;
-  color: var(--text-muted);
-  max-width: 320px;
-}
-
-/* ── Results page section labels (Qualifying / Excluding / Inconclusive) ──── */
-.results-section-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 28px 0 10px;
-  padding: 0;
-}
-
-.results-section-label .rsl-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 800;
-  flex-shrink: 0;
-}
-
-.results-section-label .rsl-title {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.results-section-label.qualifying .rsl-icon  { background: var(--green-lt); color: var(--green); }
-.results-section-label.qualifying .rsl-title { color: var(--green); }
-
-.results-section-label.excluded .rsl-icon  { background: var(--red-lt); color: var(--red); }
-.results-section-label.excluded .rsl-title { color: var(--red); }
-
-.results-section-label.inconclusive .rsl-icon  { background: var(--amber-lt); color: var(--amber); }
-.results-section-label.inconclusive .rsl-title { color: var(--amber); }
-
-#section-results .results-section-label.qualifying {
-  margin-top: 16px;
 }

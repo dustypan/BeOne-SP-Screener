@@ -36,19 +36,6 @@ const state = {
 // Persistence (localStorage)
 // ──────────────────────────────────────────────────────────────
 
-// ── SSE job helper ─────────────────────────────────────────────
-// The server returns { jobId } immediately; actual result arrives via SSE.
-function waitForJobResult(jobId) {
-  return new Promise((resolve, reject) => {
-    const es = new EventSource(`/api/screen/${jobId}/events`);
-    es.addEventListener('result', e => {
-      es.close();
-      try { resolve(JSON.parse(e.data)); } catch (err) { reject(err); }
-    });
-    es.onerror = () => { es.close(); reject(new Error('SSE connection error')); };
-  });
-}
-
 // ───────────────────────────────────────────────────────────────
 
 function loadPersisted() {
@@ -269,8 +256,7 @@ async function runScreener(names) {
 
         if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
 
-        const { jobId } = await resp.json();
-        const result = await waitForJobResult(jobId);
+        const result = await resp.json();
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -363,11 +349,18 @@ function renderSummary() {
     const el = document.getElementById('list-inconclusive');
     if (!el) return;
     if (inconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
-    el.innerHTML = inconclusive.map(c => `
-      <div class="bucket-item">
-        <strong class="bucket-company">${escHtml(c.name || c.id || '—')}</strong>
-      </div>`
-    ).join('');
+    el.innerHTML = inconclusive.map(c => {
+      const reason = c.inconclusiveReason || 'Inconclusive';
+      const isUnreadable = /website unreadable/i.test(reason);
+      const badge = isUnreadable
+        ? '<span class="badge-unreadable">🔒 Unreadable</span>'
+        : '';
+      return `<div class="bucket-item">
+        <span class="bucket-company">${escHtml(c.name)}</span>
+        ${badge}
+        <span class="bucket-reason">${escHtml(reason)}</span>
+      </div>`;
+    }).join('');
   })();
 }
 
@@ -477,7 +470,6 @@ function renderAsk1() {
     const isSkipped = state.skippedInconclusives.has(c.id);
     // Needs website input if not found in Citeline/Pharmcube
     const needsWebsiteInput = /not found in (citeline|pharmcube)/i.test(c.inconclusiveReason || '')
-      || /website input needed/i.test(c.inconclusiveReason || '')
       || c.sourceTrack === 'website-input';
     if (isPaused) {
       return `
@@ -490,16 +482,20 @@ function renderAsk1() {
     }
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
-      <strong class="url-company">${escHtml(c.name || c.id || '—')}</strong>
-      <div class="url-input-row">
-        <input type="url" class="url-input" placeholder="https://company.com/pipeline"
-          value="${escHtml(state.websiteInputs[c.id] || '')}"
-          data-id="${escHtml(c.id)}"
-          ${isSkipped ? 'disabled' : ''}>
-        <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">
-          ${isSkipped ? '↩ Unskip' : 'Skip'}
-        </button>
-      </div>
+      <span class="url-company">${escHtml(c.name)}</span>
+      <span class="url-reason">${escHtml(c.inconclusiveReason || 'Not found in Citeline database')}</span>
+      ${needsWebsiteInput
+        ? `<span class="url-note">↗ Paste <strong>pipeline page URL</strong> (preferred) or company website below</span>`
+        : /website unreadable/i.test(c.inconclusiveReason || '')
+          ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL or skip</span>`
+          : ''}
+      <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
+        value="${escHtml(state.websiteInputs[c.id] || '')}"
+        data-id="${escHtml(c.id)}"
+        ${isSkipped ? 'disabled' : ''}>
+      <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">
+        ${isSkipped ? '↩ Unskip' : 'Skip'}
+      </button>
     </div>`;
   }).join('');
 
@@ -547,17 +543,17 @@ async function continueCompanyScreening(companyId) {
   if (btn) { btn.textContent = 'Running…'; btn.disabled = true; }
 
   try {
-    const resp = await fetch('/api/screen', {
+    const resp = await fetch('/api/screen/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company: company.name,
         runId: state.currentRunId,
+        pausedState: company.pausedState,
       }),
     });
     if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-    const { jobId: resumeJobId } = await resp.json();
-    const result = await waitForJobResult(resumeJobId);
+    const result = await resp.json();
     for (const asset of result.assets || []) {
       asset.layer3 = computeLayer3(asset);
     }
@@ -611,8 +607,7 @@ async function runRescreening() {
         }),
       });
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const { jobId: rescreenJobId } = await resp.json();
-      const result = await waitForJobResult(rescreenJobId);
+      const result = await resp.json();
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -859,8 +854,14 @@ function recomputeWizardFilter() {
 
   result = result.filter(c => state.beoneReviews[c.id] !== 'negative');
 
-  // Target filter: companies stay in — individual assets with deselected targets
-  // are red-shaded inline (like screened-out assets) rather than hiding the company.
+  if (!state.anyTarget && state.selectedTargetIds.size > 0) {
+    result = result.filter(c =>
+      (c.assets || []).some(a => {
+        if (a.overallStatus === 'excluded') return false;
+        return state.selectedTargetIds.has(formatTargetSet(a.targets));
+      })
+    );
+  }
 
   state.wizardFiltered = result;
   updateRemainingCount();
@@ -914,11 +915,11 @@ function renderResults() {
     renderResultsTable();
   };
 
-  // Exclude screened-out toggle (checked = hide, unchecked = show with red shading)
+  // Show screened-out toggle
   const screenedOutToggle = document.getElementById('show-screened-out-toggle');
-  screenedOutToggle.checked = !state.showScreenedOut;
+  screenedOutToggle.checked = state.showScreenedOut || false;
   screenedOutToggle.onchange = e => {
-    state.showScreenedOut = !e.target.checked;
+    state.showScreenedOut = e.target.checked;
     renderResultsTable();
   };
 
@@ -939,20 +940,12 @@ function renderResults() {
   renderInconclusivesFooter();
 }
 
-function isAssetTargetFiltered(a) {
-  if (state.anyTarget || state.selectedTargetIds.size === 0) return false;
-  if (a.overallStatus === 'excluded') return false; // already screened out — don't double-flag
-  return !state.selectedTargetIds.has(formatTargetSet(a.targets));
-}
-
 function getFilteredAssets(company) {
   return (company.assets || []).filter(a => {
     // Step 4 (rights) and Step 5 (manufacturing) excluded assets always shown — red shading inline
     if (a.overallStatus === 'excluded' && a.layer4 && a.layer4.status === 'fail') return true;
     if (a.overallStatus === 'excluded' && a.layer5 && a.layer5.status === 'fail') return true;
     if (a.overallStatus === 'excluded' && !state.showScreenedOut) return false;
-    // Assets with a deselected target are hidden when "exclude screened-out" is on
-    if (isAssetTargetFiltered(a) && !state.showScreenedOut) return false;
     if (state.hidingCompetitors && a.layer3 && a.layer3.status === 'fail') return false;
     return true;
   });
@@ -1018,16 +1011,14 @@ function renderResultsTable() {
       const allFlags = [...new Set([...companyFlags, ...assetFlags])];
       const isCompetitor = a.layer3 && a.layer3.status === 'fail';
       const isScreenedOut = a.overallStatus === 'excluded';
-      const isTargetFiltered = isAssetTargetFiltered(a);
-      const isRedRow = isScreenedOut || isTargetFiltered;
       const screenedOutInfo = isScreenedOut ? getScreenedOutReason(a) : null;
       const rowId = `row-${c.id}-${idx}`;
       const detailId = `detail-${c.id}-${idx}`;
 
-      if (!isRedRow) totalAssetRows++;
+      if (!isScreenedOut) totalAssetRows++;
 
       html += `
-        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isRedRow ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
+        <tr class="asset-row ${isCompetitor ? 'competitor' : ''} ${isScreenedOut ? 'asset-screened-out' : ''} ${isFirst ? 'company-first-row' : ''}" id="${rowId}" data-detail="${detailId}">
           ${isFirst ? `
             <td class="co-cell" rowspan="${rowspan}">
               <span class="qualifying-badge" title="Qualifies for BeOne partnership outreach">✓</span>
@@ -1051,7 +1042,6 @@ function renderResultsTable() {
             ${escHtml(a.name || (a.isPlatform ? '[Platform]' : '—'))}
             ${isCompetitor ? '<span class="comp-tag">competitor</span>' : ''}
             ${isScreenedOut && screenedOutInfo ? `<span class="screened-out-tag">${escHtml(screenedOutInfo.step)}</span>` : ''}
-            ${isTargetFiltered ? `<span class="screened-out-tag">Target filtered</span>` : ''}
           </td>
           <td><span class="mod-tag mod-${(a.modality || '').toLowerCase().replace(/[^a-z]/g,'')}">${escHtml(a.modality || '—')}</span></td>
           <td class="targets-cell">${(a.targets || []).length ? (a.targets || []).map(t => `<span class="tgt-tag">${escHtml(t)}</span>`).join('') : '<span class="undisclosed">Undisclosed</span>'}</td>
@@ -1060,12 +1050,10 @@ function renderResultsTable() {
           <td class="flags-cell">
             ${isScreenedOut && screenedOutInfo
               ? `<span class="screened-out-reason">${escHtml(screenedOutInfo.reason)}</span>`
-              : isTargetFiltered
-                ? `<span class="screened-out-reason">Target not selected in Ask 3 filter</span>`
-                : `<div class="flags-inner">
-                    ${renderFlagBadges(allFlags)}
-                    <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
-                  </div>`
+              : `<div class="flags-inner">
+                  ${renderFlagBadges(allFlags)}
+                  <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
+                </div>`
             }
           </td>
         </tr>
@@ -1723,8 +1711,7 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${resp.status}`);
     }
-    const { jobId: wtJobId } = await resp.json();
-    const result = await waitForJobResult(wtJobId);
+    const result = await resp.json();
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {

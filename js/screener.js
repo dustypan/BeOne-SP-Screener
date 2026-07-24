@@ -132,27 +132,19 @@ function categorize(companies) {
     } else if (c.status === 'inconclusive' || c.status === 'paused') {
       inconclusive.push(c);
     } else if (c.status === 'qualifying') {
-      // A company qualifies if it has at least one asset that passes all layers (3=competitive, 4=rights, 5=manufacturing)
+      // A company qualifies if it has at least one asset that passes all layers including L5
       const hasQualifyingAsset = (c.assets || []).some(
-        a => a.overallStatus !== 'excluded' &&
-             (!a.layer3 || a.layer3.status !== 'fail') &&
-             (!a.layer4 || a.layer4.status === 'pass') &&
-             (!a.layer5 || a.layer5.status === 'pass')
+        a => a.overallStatus !== 'excluded' && (!a.layer5 || a.layer5.status === 'pass')
       );
       if (hasQualifyingAsset) {
         qualifying.push(c);
       } else {
-        const allCompetitors = (c.assets || []).every(a => a.layer3 && a.layer3.status === 'fail');
-        const allRightsOut   = !allCompetitors && (c.assets || []).every(
-          a => a.layer3 && a.layer3.status !== 'fail' && a.layer4 && a.layer4.status === 'fail'
-        );
+        const allCompetitors = (c.assets || []).every(a => a.layer5 && a.layer5.status === 'fail');
         excluded.push({
           ...c,
-          excludedAt: allCompetitors ? 'layer3' : allRightsOut ? 'layer4' : 'layer5',
+          excludedAt: 'layer5',
           excludedReason: allCompetitors
             ? 'All assets are direct competitors of BeOne pipeline'
-            : allRightsOut
-            ? 'US/global rights out-licensed for all qualifying assets'
             : 'No qualifying assets passed all layers',
         });
       }
