@@ -508,6 +508,7 @@ function renderAsk1() {
     const isSkipped = state.skippedInconclusives.has(c.id);
     // Needs website input if not found in Citeline/Pharmcube
     const needsWebsiteInput = /not found in (citeline|pharmcube)/i.test(c.inconclusiveReason || '')
+      || /website input needed/i.test(c.inconclusiveReason || '')
       || c.sourceTrack === 'website-input';
     if (isPaused) {
       return `
