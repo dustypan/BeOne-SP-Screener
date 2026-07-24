@@ -915,17 +915,6 @@ ${body}`
     .trim();
 })();
 
-// Search-mode variant — same rules as URL track but context tells Claude it has web_search.
-const WEBSITE_INPUT_SEARCH_SYSTEM_PROMPT = WEBSITE_INPUT_SYSTEM_PROMPT
-  .replace(
-    'You have two tools only: fetch_webpage (to read the URL) and OneBD tools (for Steps 4+5 deals). You have NO web_search tool - do not attempt to search the web.',
-    'You have web_search (max 3 uses to locate the pipeline page), fetch_webpage, and OneBD tools.'
-  )
-  .replace(
-    "OBJECTIVE: Fetch the provided URL to discover the company's pipeline (Steps 1+2), then run Steps 3 \u2192 4+5 in order.",
-    "OBJECTIVE: Search for the company's pipeline page, fetch it to discover the pipeline (Steps 1+2), then run Steps 3 \u2192 4+5 in order."
-  );
-
 // Website input track prompt - Steps 1+2 from user-supplied URL, Steps 3+4+5 via OneBD.
 // No web_search available. Derived from the same Steps 3+4+5 body as the other prompts.
 const WEBSITE_INPUT_SYSTEM_PROMPT = (() => {
@@ -967,6 +956,17 @@ ${body}`
     )
     .trim();
 })();
+
+// Search-mode variant — same rules as URL track but context tells Claude it has web_search.
+const WEBSITE_INPUT_SEARCH_SYSTEM_PROMPT = WEBSITE_INPUT_SYSTEM_PROMPT
+  .replace(
+    'You have two tools only: fetch_webpage (to read the URL) and OneBD tools (for Steps 4+5 deals). You have NO web_search tool - do not attempt to search the web.',
+    'You have web_search (max 3 uses to locate the pipeline page), fetch_webpage, and OneBD tools.'
+  )
+  .replace(
+    "OBJECTIVE: Fetch the provided URL to discover the company's pipeline (Steps 1+2), then run Steps 3 → 4+5 in order.",
+    "OBJECTIVE: Search for the company's pipeline page, fetch it to discover the pipeline (Steps 1+2), then run Steps 3 → 4+5 in order."
+  );
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Tool implementations
