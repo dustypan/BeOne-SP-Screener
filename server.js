@@ -2712,6 +2712,15 @@ app.post('/api/screen', async (req, res) => {
   const apiKey = process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured. Enter your key in the screener settings.' });
 
+  // SSE — keeps connection alive through deployment proxy timeouts
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const _ka = setInterval(() => res.write(': keepalive\n\n'), 20000);
+  const sseEnd = (data) => { clearInterval(_ka); res.write(`data: ${JSON.stringify(data)}\n\n`); res.end(); };
+
   console.log(`\n${'â”€'.repeat(60)}\n[${company}] Screening: ${company}${websiteUrl ? ` (URL: ${websiteUrl})` : ''}\n${'â”€'.repeat(60)}`);
 
   try {
@@ -2723,7 +2732,7 @@ app.post('/api/screen', async (req, res) => {
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' - ' + result.inconclusiveReason : ''}`);
     result.screenerLog = buildScreenerLog(result);
     if (runId) saveCompanyToDb(runId, result);
-    res.json(result);
+    sseEnd(result);
   } catch (err) {
     // Classify the error: transient (safe to re-run) vs. genuine failure.
     // Transient: 429/500/502/503/529 from Anthropic, explicit SDK error types,
@@ -2758,7 +2767,7 @@ app.post('/api/screen', async (req, res) => {
     };
     errorResult.screenerLog = buildScreenerLog(errorResult);
     if (runId) saveCompanyToDb(runId, errorResult);
-    res.json(errorResult);
+    sseEnd(errorResult);
   }
 });
 
@@ -2777,6 +2786,15 @@ app.post('/api/screen/website-track', async (req, res) => {
   const apiKey = process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured.' });
 
+  // SSE — keeps connection alive through deployment proxy timeouts
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const _ka = setInterval(() => res.write(': keepalive\n\n'), 20000);
+  const sseEnd = (data) => { clearInterval(_ka); res.write(`data: ${JSON.stringify(data)}\n\n`); res.end(); };
+
   console.log(`\n${'â”€'.repeat(60)}\n[${companyName}] Website Track (supplemental): ${websiteUrl}\n${'â”€'.repeat(60)}`);
 
   try {
@@ -2786,10 +2804,10 @@ app.post('/api/screen/website-track', async (req, res) => {
     logScreeningBreakdown(result);
     console.log(`    [${companyName}] [website-track FINAL] ${result.status}`);
     result.screenerLog = buildScreenerLog(result);
-    res.json(result);
+    sseEnd(result);
   } catch (err) {
     console.error(`  [${companyName}] âœ— website-track: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    sseEnd({ error: err.message });
   }
 });
 

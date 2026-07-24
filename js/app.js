@@ -1,6 +1,39 @@
 'use strict';
 
 // ──────────────────────────────────────────────────────────────
+// SSE fetch helper — reads a text/event-stream response and
+// returns the parsed JSON from the first `data:` line.
+// Keeps long screening requests alive through proxy timeouts.
+// ──────────────────────────────────────────────────────────────
+async function ssePost(url, body) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const parsed = JSON.parse(line.slice(6));
+        if (parsed.error) throw new Error(parsed.error);
+        return parsed;
+      }
+    }
+    const nl = buf.lastIndexOf('\n');
+    if (nl >= 0) buf = buf.slice(nl + 1);
+  }
+  throw new Error('Stream ended without result');
+}
+
+// ──────────────────────────────────────────────────────────────
 // Application state
 // ──────────────────────────────────────────────────────────────
 
@@ -249,15 +282,7 @@ async function runScreener(names) {
     } else {
       // Not yet screened — call the server
       try {
-        const resp = await fetch('/api/screen', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company: name, runId: state.currentRunId }),
-        });
-
-        if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-
-        const result = await resp.json();
+        const result = await ssePost('/api/screen', { company: name, runId: state.currentRunId });
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -595,18 +620,12 @@ async function runRescreening() {
       || company.sourceTrack === 'website-input';
     const skipCiteline = notFoundInDatabase;
     try {
-      const resp = await fetch('/api/screen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company: company.name,
-          runId: state.currentRunId,
-          websiteUrl,
-          skipCiteline,
-        }),
+      const result = await ssePost('/api/screen', {
+        company: company.name,
+        runId: state.currentRunId,
+        websiteUrl,
+        skipCiteline,
       });
-      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const result = await resp.json();
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -1678,16 +1697,10 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
   btn.textContent = '⏳ Running…';
 
   try {
-    const resp = await fetch('/api/screen/website-track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ companyName: company.name, websiteUrl: websiteUrl || company.website || '' }),
+    const result = await ssePost('/api/screen/website-track', {
+      companyName: company.name,
+      websiteUrl: websiteUrl || company.website || '',
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${resp.status}`);
-    }
-    const result = await resp.json();
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {
