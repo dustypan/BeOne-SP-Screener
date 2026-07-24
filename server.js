@@ -1532,28 +1532,42 @@ function citelineGetAssetsLocal(companyName) {
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Stem match: "hanchor bio" = "hanchorbio" = "hanchor therapeutics" â†' all stem to "hanchor"
-  const matchedRows = [];
+  // Stem match: group index hits by company name, keep only those that pass
+  // the collision guard. This prevents a partial-stem hit on an unrelated company
+  // (e.g. "Prime Medicine" whose stem "prime" is contained in needle "primelink")
+  // from masking the correct entry ("PrimeLink BioTherapeutics").
+  const byCompany = {};
   for (const [stem, rows] of Object.entries(citelineIndex)) {
     if (stem === needle ||
         (needle.length >= 4 && stem.length >= 4 && (stem.includes(needle) || needle.includes(stem)))) {
-      matchedRows.push(...rows);
+      for (const row of rows) {
+        const cn = row.companyName || '';
+        if (!byCompany[cn]) byCompany[cn] = [];
+        byCompany[cn].push(row);
+      }
     }
   }
 
-  if (matchedRows.length === 0) {
+  // Filter to companies whose name actually matches the query
+  const matchingCompanies = Object.entries(byCompany)
+    .filter(([cn]) => closeNameMatch(companyName, cn));
+
+  if (matchingCompanies.length === 0) {
+    // Check if any stem hit existed at all (for a better log message)
+    const anyHit = Object.keys(byCompany);
+    if (anyHit.length > 0) {
+      console.log(`    [${companyName}] [citeline] stem hits found (${anyHit.join(', ')}) but none pass name guard - routing to website input`);
+    }
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Name collision guard: reject stem matches where the Citeline company name is
-  // clearly a different entity (e.g. "Checkmate Pharmaceuticals" â‰  "Checkmate
-  // Therapeutics"). Only accept if the Citeline name is a close match to the
-  // searched name (exact after stripping generic legal suffixes, or one contains
-  // the other). Checked against the first row's companyName - all rows share it.
-  const citelineCompanyName = matchedRows[0].companyName || '';
-  if (citelineCompanyName && !closeNameMatch(companyName, citelineCompanyName)) {
-    console.log(`    [${companyName}] [citeline] stem match found "${citelineCompanyName}" but names differ - routing to website input`);
-    return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
+  // Use the best-matching company (prefer exact stem match; fall back to first)
+  const bestMatch = matchingCompanies.find(([cn]) => stemCompany(cn) === needle) || matchingCompanies[0];
+  const citelineCompanyName = bestMatch[0];
+  const matchedRows = bestMatch[1];
+
+  if (matchingCompanies.length > 1) {
+    console.log(`    [${companyName}] [citeline] multiple name matches: ${matchingCompanies.map(([cn]) => cn).join(', ')} - using "${citelineCompanyName}"`);
   }
 
   // Company-level URL fields - same across all rows for this company
