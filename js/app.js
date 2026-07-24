@@ -745,12 +745,53 @@ const TARGET_SYNONYMS = {
 // Mechanism/modality terms that are NOT specific molecular targets —
 // strip these from the target display so Ask 3 shows only real targets.
 const NON_TARGET_TERMS = new Set([
+  // Protein degradation mechanisms
   'Protein degrader', 'Protein Degrader', 'Protein degradation', 'Protein Degradation',
-  'Tubulin', 'Microtubule', 'Microtubules',
-  'DNA', 'DNA damage', 'Topoisomerase', 'Topoisomerase I', 'Topoisomerase II',
+  'PROTAC', 'Molecular glue', 'Molecular Glue', 'Targeted protein degradation',
+  'Ubiquitin', 'Proteasome', 'Ubiquitin-proteasome',
+
+  // Cytoskeleton / generic cytotoxic mechanisms
+  'Tubulin', 'Tubulin polymerization', 'Microtubule', 'Microtubules',
+  'Actin', 'Cytoskeleton',
+
+  // DNA / replication mechanisms
+  'DNA', 'DNA damage', 'DNA repair', 'DNA replication',
+  'Topoisomerase', 'Topoisomerase I', 'Topoisomerase II',
+  'PARP', 'Helicase',
+
+  // ADC payload / warhead names (mechanism, not a receptor target)
+  'MMAE', 'MMAF', 'Auristatin', 'Auristatin E', 'Auristatin F',
+  'DM1', 'DM4', 'Maytansinoid', 'Maytansine',
+  'DXd', 'Deruxtecan', 'Exatecan', 'SN-38', 'Irinotecan',
+  'PBD', 'Pyrrolobenzodiazepine', 'PBD dimer',
+  'Calicheamicin', 'Tubulysin', 'Cryptophycin', 'Dolastatin',
+  'Duocarmycin', 'Anthracycline', 'Doxorubicin',
+  'Camptothecin', 'Topotecan', 'Belotecan',
+  'Alpha-amanitin', 'Amanitins',
+
+  // Radionuclide / radiopharmaceutical payloads
+  'Radionuclide', 'Radioisotope', 'Alpha emitter', 'Beta emitter',
+  'Lu-177', 'Lutetium-177', 'Ac-225', 'Actinium-225', 'Y-90', 'I-131',
+  'Radiolabeled', 'Radioimmunotherapy',
+
+  // Generic therapy/treatment labels
   'Radiotherapy', 'Chemotherapy', 'Immunotherapy',
-  'mRNA', 'siRNA', 'miRNA',
-  'Fc receptor', 'Fc Receptor',
+  'Cytotoxin', 'Cytotoxic', 'Apoptosis', 'Apoptosis inducer',
+
+  // Nucleic acid mechanisms
+  'mRNA', 'siRNA', 'miRNA', 'shRNA', 'antisense', 'Antisense',
+  'Oligonucleotide', 'RNA', 'DNA',
+
+  // Fc / generic antibody framework terms
+  'Fc receptor', 'Fc Receptor', 'Fc', 'Antibody', 'Bispecific', 'Multispecific',
+
+  // Vague / non-informative
+  'Antigen', 'Tumor antigen', 'Tumor Antigen', 'Cancer antigen',
+  'Receptor', 'Immune checkpoint', 'Checkpoint',
+  'Cell surface', 'Cell Surface', 'Surface antigen',
+  'Cytokine', 'Linker', 'Cleavable linker', 'Non-cleavable linker',
+  'Payload', 'Warhead', 'Drug conjugate',
+  'Stochastic', 'Bifunctional',
 ]);
 
 function normalizeTarget(t) {
