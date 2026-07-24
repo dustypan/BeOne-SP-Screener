@@ -1663,6 +1663,7 @@ function citelineGetAssetsLocal(companyName) {
     drugId:           r.drugId,
     drug:             r.drugPrimaryName ? r.drugPrimaryName.replace(/BeiGene/gi, 'BeOne') : r.drugPrimaryName,
     altNames:         r.altNames ? r.altNames.replace(/BeiGene/gi, 'BeOne') : '',
+    drugOverview:     r.drugOverview    || '',
     citelineModality: r.drugTypeCaption,
     citelinePhase:    r.globalStatus,
     status:           r.globalStatus,
@@ -2067,7 +2068,8 @@ async function screenWithCitelinePrimary(companyName, client) {
       `  MOA/Targets: ${r.targets || 'Undisclosed'}\n` +
       `  Indications: ${r.indications || 'Not specified'}\n` +
       `  Phase      : ${phase}\n` +
-      `  Status     : ${r.status}`
+      `  Status     : ${r.status}` +
+      (r.drugOverview ? `\n  Overview   : ${r.drugOverview.slice(0, 500)}` : '')
     );
   }).join('\n\n');
 
