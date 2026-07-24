@@ -975,7 +975,6 @@ function renderResults() {
   document.getElementById('autoflag-btn').onclick = runAutoFlag;
 
   renderResultsTable();
-  renderAllExcludedSection();
   renderExcludedFooter();
   renderInconclusivesFooter();
 }
@@ -1262,82 +1261,69 @@ function renderAssetDetail(company, asset) {
   `;
 }
 
-function renderAllExcludedSection() {
-  const section = document.getElementById('all-excluded-footer');
-  const tbody = document.getElementById('all-excluded-tbody');
+function renderExcludedFooter() {
+  const section = document.getElementById('excluded-footer');
+  const tbody   = document.getElementById('excluded-tbody');
   if (!section || !tbody) return;
 
+  // 1. Companies from the qualifying table where every asset was step-excluded
   const hasQualifyingAsset = c => (c.assets || []).some(a =>
     a.overallStatus !== 'excluded' && !(a.layer3 && a.layer3.status === 'fail')
   );
+  const allAssetsExcluded = (state.wizardFiltered || []).filter(c => !hasQualifyingAsset(c));
 
-  const allExcluded = (state.wizardFiltered || []).filter(c => !hasQualifyingAsset(c));
+  const seenIds = new Set(allAssetsExcluded.map(c => c.id));
 
-  if (allExcluded.length === 0) {
-    section.classList.add('hidden');
-    return;
-  }
-
-  section.classList.remove('hidden');
-
-  tbody.innerHTML = allExcluded.map(c => {
-    const reasons = [];
-    const l4 = (c.assets || []).filter(a => a.layer4 && a.layer4.status === 'fail');
-    const l5 = (c.assets || []).filter(a => a.layer5 && a.layer5.status === 'fail');
-    if (l4.length) {
-      const uniq = [...new Set(l4.map(a => a.layer4.reason).filter(Boolean))];
-      reasons.push('Rights out-licensed (Step 4)' + (uniq.length ? ': ' + uniq[0] : ''));
-    }
-    if (l5.length) {
-      const uniq = [...new Set(l5.map(a => a.layer5.reason).filter(Boolean))];
-      reasons.push('US mfg confirmed (Step 5)' + (uniq.length ? ': ' + uniq[0] : ''));
-    }
-    if (!reasons.length) {
-      const any = (c.assets || []).find(a => a.overallStatus === 'excluded');
-      reasons.push(any ? (any.excludedReason || 'All assets excluded') : 'All assets excluded');
-    }
-    return `
-      <tr>
-        <td><span class="all-excluded-badge" title="All assets excluded">✗</span> <strong>${escHtml(c.name)}</strong></td>
-        <td>${(c.assets || []).length}</td>
-        <td>${escHtml(reasons.join('; '))}</td>
-      </tr>`;
-  }).join('');
-}
-
-function renderExcludedFooter() {
-  const section = document.getElementById('excluded-footer');
-  const tbody = document.getElementById('excluded-tbody');
-  if (!section || !tbody) return;
-
-  // Screener-excluded companies (deduped)
-  const seenIds = new Set();
+  // 2. Screener-excluded companies (no qualifying biologics / wrong modality)
   const screenerExcluded = (state.categories.excluded || []).filter(c => {
     if (seenIds.has(c.id)) return false;
     seenIds.add(c.id);
     return true;
   });
 
-  // Qualifying companies the user marked negative in Ask 2
+  // 3. Qualifying companies the user marked negative in Ask 2
   const userExcluded = (state.categories.qualifying || []).filter(c =>
     state.beoneReviews[c.id] === 'negative' && !seenIds.has(c.id)
   );
 
-  const allItems = screenerExcluded.length + userExcluded.length;
+  const allItems = allAssetsExcluded.length + screenerExcluded.length + userExcluded.length;
   if (allItems === 0) {
     section.classList.add('hidden');
     return;
   }
-
   section.classList.remove('hidden');
 
+  // Rows for companies whose every qualifying asset was step-excluded (Steps 3-5)
+  const assetExcludedRows = allAssetsExcluded.map(c => {
+    const l4 = (c.assets || []).filter(a => a.layer4 && a.layer4.status === 'fail');
+    const l5 = (c.assets || []).filter(a => a.layer5 && a.layer5.status === 'fail');
+    const reasons = [];
+    if (l4.length) { const u = [...new Set(l4.map(a => a.layer4.reason).filter(Boolean))]; reasons.push(u[0] || 'Rights out-licensed'); }
+    if (l5.length) { const u = [...new Set(l5.map(a => a.layer5.reason).filter(Boolean))]; reasons.push(u[0] || 'US mfg confirmed'); }
+    if (!reasons.length) {
+      const any = (c.assets || []).find(a => a.overallStatus === 'excluded');
+      reasons.push(any ? (any.excludedReason || 'All assets excluded') : 'All assets excluded');
+    }
+    const excludedAt = l4.length ? 'Step 4' : l5.length ? 'Step 5' : 'Steps 3–5';
+    const sourceLink = c.website
+      ? `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`
+      : '—';
+    return `
+      <tr>
+        <td><strong>${escHtml(c.name)}</strong></td>
+        <td>${escHtml(excludedAt)}</td>
+        <td>${escHtml(reasons.join('; '))}</td>
+        <td>${sourceLink}</td>
+        <td>—</td>
+        <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
+      </tr>`;
+  });
+
+  // Rows for screener-excluded companies
   const screenerRows = screenerExcluded.map(c => {
     let sourceLink = '—';
-    if (c.excludedSource) {
-      sourceLink = `<a href="${escHtml(c.excludedSource)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`;
-    } else if (c.website) {
-      sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
-    }
+    if (c.excludedSource) sourceLink = `<a href="${escHtml(c.excludedSource)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`;
+    else if (c.website)   sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
     return `
       <tr>
         <td>${escHtml(c.name)}</td>
@@ -1346,10 +1332,10 @@ function renderExcludedFooter() {
         <td>${sourceLink}</td>
         <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
         <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
-      </tr>
-    `;
+      </tr>`;
   });
 
+  // Rows for user-marked-negative companies
   const userRows = userExcluded.map(c => `
     <tr class="user-excluded-row">
       <td>${escHtml(c.name)}</td>
@@ -1358,68 +1344,20 @@ function renderExcludedFooter() {
       <td>${c.website ? `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>` : '—'}</td>
       <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
       <td><button class="btn-sources-view" data-co-id="${escHtml(c.id)}">🔗 Sources</button></td>
-    </tr>
-  `);
+    </tr>`);
 
-  tbody.innerHTML = [...screenerRows, ...userRows].join('');
+  tbody.innerHTML = [...assetExcludedRows, ...screenerRows, ...userRows].join('');
 
+  const allCompanies = [...allAssetsExcluded, ...screenerExcluded, ...userExcluded];
   tbody.querySelectorAll('.btn-console-view').forEach(btn => {
     btn.addEventListener('click', () => {
-      const company = [...screenerExcluded, ...userExcluded].find(c => c.id === btn.dataset.id);
+      const company = allCompanies.find(c => c.id === btn.dataset.id);
       if (company) openConsoleModal(company.name, company.screenerLog);
     });
   });
-
   tbody.querySelectorAll('.btn-sources-view').forEach(btn => {
     btn.addEventListener('click', () => openSourcesModal(btn.dataset.coId));
   });
-
-  // Manufacturing-excluded assets sub-section (step5 / layer4 failures across all companies)
-  const mfgExcluded = [];
-  for (const co of (state.companies || [])) {
-    for (const a of (co.assets || [])) {
-      if (a.layer4 && a.layer4.status === 'fail') {
-        mfgExcluded.push({ co, a });
-      }
-    }
-  }
-
-  let mfgSection = document.getElementById('mfg-excluded-section');
-  if (!mfgSection) {
-    mfgSection = document.createElement('div');
-    mfgSection.id = 'mfg-excluded-section';
-    section.appendChild(mfgSection);
-  }
-
-  if (mfgExcluded.length === 0) {
-    mfgSection.innerHTML = '';
-  } else {
-    const mfgRows = mfgExcluded.map(({ co, a }) => {
-      const src = a.layer4.source
-        ? `<a href="${escHtml(a.layer4.source)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`
-        : '—';
-      return `<tr>
-        <td>${escHtml(co.name)}</td>
-        <td>${escHtml(a.name || '—')}</td>
-        <td>${escHtml(a.modality || '—')}</td>
-        <td>${escHtml((a.targets || []).join(', ') || '—')}</td>
-        <td>${escHtml(a.layer4.reason || 'US manufacturing confirmed')}</td>
-        <td>${src}</td>
-      </tr>`;
-    }).join('');
-
-    mfgSection.innerHTML = `
-      <h4 class="mfg-excluded-heading">Assets excluded at manufacturing (Step 5)</h4>
-      <div class="results-table-wrap">
-        <table class="results-table">
-          <thead><tr>
-            <th>Company</th><th>Asset</th><th>Modality</th>
-            <th>Target(s)</th><th>Reason</th><th>Source</th>
-          </tr></thead>
-          <tbody>${mfgRows}</tbody>
-        </table>
-      </div>`;
-  }
 }
 
 function openConsoleModal(name, log) {

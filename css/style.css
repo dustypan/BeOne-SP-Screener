@@ -901,6 +901,36 @@ tr.row-paused td { background: var(--amber-lt); }
   border-top: 1px solid var(--gray-200);
 }
 
+/* ── Results section-group bars (Qualifying / Excluded) ─────── */
+.results-section-bar {
+  position: sticky;
+  top: 53px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: 36px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  border-radius: 0;
+  margin: 0 0 0 0;
+}
+.results-section-bar--qualifying {
+  background: #f0fdf4;
+  color: #15803d;
+  border-top: 2px solid #86efac;
+  border-bottom: 1px solid #bbf7d0;
+}
+.results-section-bar--excluded {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-top: 2px solid #fca5a5;
+  border-bottom: 1px solid #fecaca;
+  margin-top: 28px;
+}
+
 /* ── Results Section ──────────────────────────────────────── */
 .results-toolbar {
   display: flex;
@@ -980,7 +1010,7 @@ tr.row-paused td { background: var(--amber-lt); }
   text-align: left;
   white-space: nowrap;
   position: sticky;
-  top: 53px;
+  top: 89px;
   z-index: 5;
 }
 
@@ -1390,27 +1420,11 @@ details[open] > .evidence-snapshots-header::before { content: '▼ '; }
   word-break: break-word;
 }
 
-/* Excluded footer */
-#excluded-footer {
-  margin-top: 24px;
-}
-
-#excluded-footer h3 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--red);
-  margin-bottom: 12px;
-}
-
 .user-excluded-row td { color: var(--text-muted); font-style: italic; }
 
-.mfg-excluded-heading {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin: 20px 0 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--gray-200);
+/* Excluded footer — no extra top margin; section bar provides the gap */
+#excluded-footer {
+  margin-top: 0;
 }
 
 /* Inconclusives footer */

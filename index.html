@@ -278,6 +278,8 @@
     </div>
     <div id="autoflag-status" class="autoflag-status hidden"></div>
 
+    <div class="results-section-bar results-section-bar--qualifying">✓ Qualifying</div>
+
     <div class="results-table-wrap">
       <table class="results-table">
         <thead>
@@ -303,26 +305,9 @@
       <button id="page-next" class="btn-page">Next →</button>
     </div>
 
-    <!-- All-assets-excluded qualifying companies -->
-    <div id="all-excluded-footer" class="hidden">
-      <h3 class="all-excluded-heading">✗ Excluded Companies (all assets out-licensed or covered)</h3>
-      <div class="results-table-wrap">
-        <table class="results-table">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Assets</th>
-              <th>Rationale</th>
-            </tr>
-          </thead>
-          <tbody id="all-excluded-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Excluded footer -->
+    <!-- Excluded (all types merged) -->
     <div id="excluded-footer" class="hidden">
-      <h3>✗ Excluded</h3>
+      <div class="results-section-bar results-section-bar--excluded">✗ Excluded</div>
       <div class="results-table-wrap">
         <table class="results-table">
           <thead>
