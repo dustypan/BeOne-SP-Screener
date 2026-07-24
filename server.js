@@ -575,7 +575,7 @@ FLAGS â€” Claude sets these automatically:
     for at least one qualifying asset. Company still screens IN when this flag is set.
 indication-synergy, phase-synergy, checkpoint-io-alt, and masked-tce-4-1bb are auto-computed
 server-side from asset data after screening â€” do not set these yourself.
-adc-novel-payload still requires manual autoflag (payload detail not in Citeline data).
+adc-novel-payload now also auto-detected from drugOverview when payload text is clear.
 `.trim();
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1561,7 +1561,8 @@ function closeNameMatch(searchName, citeName) {
   return false;
 }
 
-let citelineIndex = null; // map: stemmedCompanyName â†' row[]
+let citelineIndex   = null; // map: stemmedCompanyName
+let drugOverviewMap = {};   // map: drugId → drugOverview text â†' row[]
 
 function loadCitelineSpreadsheet() {
   const candidates = [
@@ -1580,12 +1581,16 @@ function loadCitelineSpreadsheet() {
   const sheetName = wb.SheetNames.includes('Sheet2') ? 'Sheet2' : wb.SheetNames[0];
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
 
-  citelineIndex = {};
+  citelineIndex   = {};
+  drugOverviewMap = {};
   for (const row of rows) {
     const stem = stemCompany(row.companyName);
     if (!stem || stem.length < 3) continue;
     if (!citelineIndex[stem]) citelineIndex[stem] = [];
     citelineIndex[stem].push(row);
+    if (row.drugId && row.drugOverview && !drugOverviewMap[String(row.drugId)]) {
+      drugOverviewMap[String(row.drugId)] = row.drugOverview;
+    }
   }
   console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineIndex).length} company stems`);
 }
@@ -1677,6 +1682,7 @@ function citelineGetAssetsLocal(companyName) {
     allManufacturers: r.allManufacturers || '',
     allPayloads:      r.allPayloads    || '',
     allTargets:       r.allTargets     || '',
+    allTargetsRaw:    r.allTargets     || '',
   }));
 
   return { rows, coverageStatus: 'qualifying', companyWebsite, pipelineUrl };
@@ -1874,34 +1880,75 @@ function computePhaseSynergy(asset, ctgov) {
 // TCEs are excluded (they have their own masked-tce flag). PD-1/PD-L1 combos no longer qualify.
 const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a', 'ox40', 'cd134', '4-1bb', 'cd137', 'icos', 'cd278', 'gitr', 'cd357'];
 
+// ── Overview-based flag patterns (mine drugOverview text) ────────────────────
+// Checkpoint alt targets as free text
+const OVERVIEW_CHECKPOINT_RE = /\b(lag-?3|tim-?3|tigit|ctla-?4|vista|btla|cd96|nkg2a|ox40|4-1bb|cd137|icos|gitr)\b/i;
+// Masking / conditional activation language for masked TCE
+const OVERVIEW_MASKED_TCE_RE = /\b(masked?|probody|conditional(?:ly)?\s*activ|TME[- ]cleavable|protease[- ]cleavable|enzyme[- ]cleavable|prodrug|masking\s+moiet|stimulus[- ]responsive|conditionally?\s+active|pro-?biologic|switchable)\b/i;
+const OVERVIEW_TCE_RE        = /\b(t[- ]?cell\s+engag|bispecific.*t[- ]?cell|TCE|T[- ]cell\s+redirect|CD3)\b/i;
+const OVERVIEW_4_1BB_RE      = /\b(4-1bb|cd137)\b/i;
+// Novel ADC payload — dual or unique
+const OVERVIEW_DUAL_PAYLOAD_RE   = /\b(dual[- ]payload|two\s+payload|dual[- ]warhead|two\s+warhead|combination\s+payload|dual[- ]drug)\b/i;
+const OVERVIEW_NOVEL_PAYLOAD_RE  = /\b(DM1|DM4|maytansin|PBD|pyrrolobenzodiazepin|calicheamicin|tubulysin|cryptophycin|dolastatin|duocarmycin|alpha[- ]amanitin|amanitin|MMAF|monomethyl\s+auristatin\s+F|colchicine|combretastatin|KSP\s+inhibitor|kinesin\s+spindle|CC-1065|auristatin\s+F)\b/i;
+const OVERVIEW_COMMON_PAYLOAD_RE = /\b(DXd|deruxtecan|SN-38|exatecan|MMAE|monomethyl\s+auristatin\s+E)\b/i;
+const OVERVIEW_ADC_RE            = /\b(antibody[- ]drug\s+conjugate|ADC|conjugate)\b/i;
+
 // Compute flags directly from Steps 1+2 asset data (no web research needed).
 // Called automatically after every screening run â€” no manual autoflag step required
 // for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
 // adc-novel-payload and TCE masking moiety still need manual autoflag (payload detail not in Citeline data).
-function computeFlagsFromAsset(asset) {
+// Called automatically after every screening run — no manual autoflag step required
+// for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
+// adc-novel-payload now also auto-detected from drugOverview when payload text is clear.
+function computeFlagsFromAsset(asset, overview) {
   if (!asset || asset.overallStatus === 'excluded') return [];
-  const flags = new Set();
-  const targets = (asset.targets || []).map(t => (t || '').toLowerCase());
+  const flags   = new Set();
+  const targets  = (asset.targets || []).map(t => (t || '').toLowerCase());
   const modality = (asset.modality || '').toLowerCase();
-  const phase = (asset.phase || '').toLowerCase();
+  const phase    = (asset.phase || '').toLowerCase();
+  const ov       = overview || '';  // drugOverview text — second-check source
 
-  // Indication synergy â€” keyword match on indication field
-  if (matchesIndicationSynergy(asset.indication || '')) flags.add('indication-synergy');
+  // ── Indication synergy ────────────────────────────────────────────────────
+  // Primary: structured indication field. Second check: drugOverview text.
+  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(ov))
+    flags.add('indication-synergy');
 
-  // Phase synergy â€” lead optimization OR Phase 2â†'3 boundary only
+  // ── Phase synergy ─────────────────────────────────────────────────────────
   const leadOptTerms = ['lead opt', 'lead optimization', 'lead candidate', 'lead selection'];
   if (leadOptTerms.some(t => phase.includes(t))) flags.add('phase-synergy');
   if (phase.includes('2/3') || phase.includes('ii/iii') || phase.includes('2/iii') || phase.includes('ii/3')) flags.add('phase-synergy');
 
-  // Strategic â€” checkpoint IO alt: non-PD-1/PD-L1 checkpoint target, non-TCE modality only.
-  // TCEs are excluded (they belong to masked-tce). PD-1/PD-L1 combos no longer qualify.
+  // ── Checkpoint IO alt ─────────────────────────────────────────────────────
+  // Primary: structured targets array.
+  // Second check: drugOverview text — catches cases where target name is only in description.
   const isTCE = modality === 'tce' || modality.includes('t cell engager') || modality.includes('t-cell engager');
-  const hasAltCheckpoint = targets.some(t => CHECKPOINT_ALT_TARGETS.some(c => t.includes(c)));
-  if (hasAltCheckpoint && !isTCE) flags.add('checkpoint-io-alt');
+  const hasAltCheckpointTargets  = targets.some(t => CHECKPOINT_ALT_TARGETS.some(c => t.includes(c)));
+  const hasAltCheckpointOverview = ov && OVERVIEW_CHECKPOINT_RE.test(ov);
+  if ((hasAltCheckpointTargets || hasAltCheckpointOverview) && !isTCE)
+    flags.add('checkpoint-io-alt');
 
-  // Strategic â€” 4-1BB arm (TCE or bsAb/tsAb engaging 4-1BB/CD137)
-  const has41BB = targets.some(t => t.includes('4-1bb') || t.includes('cd137'));
-  if (has41BB) flags.add('masked-tce-4-1bb');
+  // ── Masked TCE (4-1BB / masking moiety) ──────────────────────────────────
+  // Primary: 4-1BB / CD137 in structured targets.
+  // Second check: drugOverview — 4-1BB mention OR masking language on a TCE.
+  const has41BBTargets  = targets.some(t => t.includes('4-1bb') || t.includes('cd137'));
+  const has41BBOverview = ov && OVERVIEW_4_1BB_RE.test(ov);
+  const hasMaskingOv    = ov && OVERVIEW_MASKED_TCE_RE.test(ov) && OVERVIEW_TCE_RE.test(ov);
+  if (has41BBTargets || has41BBOverview || hasMaskingOv)
+    flags.add('masked-tce-4-1bb');
+
+  // ── ADC novel payload ─────────────────────────────────────────────────────
+  // From drugOverview only — payload names are not in structured Citeline columns.
+  // Fires when: (a) novel/rare payload named explicitly, OR (b) dual payload mentioned.
+  // Suppressed when only common payloads (DXd, SN-38, MMAE) appear without a novel one.
+  const isADC = modality.includes('adc') || modality.includes('antibody-drug') ||
+                modality.includes('antibody drug') || OVERVIEW_ADC_RE.test(ov);
+  if (isADC && ov) {
+    const hasDual       = OVERVIEW_DUAL_PAYLOAD_RE.test(ov);
+    const hasNovel      = OVERVIEW_NOVEL_PAYLOAD_RE.test(ov);
+    const hasCommonOnly = OVERVIEW_COMMON_PAYLOAD_RE.test(ov) && !hasNovel;
+    if (hasDual || (hasNovel && !hasCommonOnly))
+      flags.add('adc-novel-payload');
+  }
 
   return Array.from(flags);
 }
@@ -1921,7 +1968,8 @@ function applyAutoFlags(result) {
         asset.excludedReason = `Development ceased (phase: ${asset.phase})`;
       }
     }
-    const derived = computeFlagsFromAsset(asset);
+    const overview = drugOverviewMap[String(asset.drugId || '')] || asset.drugOverview || '';
+    const derived = computeFlagsFromAsset(asset, overview);
     asset.flags = derived;
     derived.forEach(f => companyFlags.add(f));
   }
@@ -2066,6 +2114,7 @@ async function screenWithCitelinePrimary(companyName, client) {
       `  AltNames   : ${r.altNames || 'None'}\n` +
       `  Modality   : ${modality} (Citeline: ${r.citelineModality})\n` +
       `  MOA/Targets: ${r.targets || 'Undisclosed'}\n` +
+      (r.allTargetsRaw ? `  Targets(mol): ${r.allTargetsRaw}\n` : '') +
       `  Indications: ${r.indications || 'Not specified'}\n` +
       `  Phase      : ${phase}\n` +
       `  Status     : ${r.status}` +
