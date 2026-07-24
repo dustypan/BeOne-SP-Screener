@@ -468,15 +468,15 @@ function renderAsk1() {
   container.innerHTML = allInconclusive.map(c => {
     const isPaused = c.status === 'paused';
     const isSkipped = state.skippedInconclusives.has(c.id);
-    // Needs website input if not found in Citeline/Pharmcube
-    const needsWebsiteInput = /not found in (citeline|pharmcube)/i.test(c.inconclusiveReason || '')
+    // Needs website input if not found in Citeline database
+    const needsWebsiteInput = /not found in citeline/i.test(c.inconclusiveReason || '')
       || c.sourceTrack === 'website-input';
     if (isPaused) {
       return `
     <div class="url-row url-row-paused" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
       <span class="url-reason">${escHtml(c.inconclusiveReason || 'Credit cap reached')}</span>
-      <span class="url-note url-note-warn">⚡ Pharmcube data saved — no re-billing needed to continue</span>
+
       <button class="btn-continue-screen" data-id="${escHtml(c.id)}">Continue anyway</button>
     </div>`;
     }
@@ -532,8 +532,7 @@ function renderAsk1() {
   });
 }
 
-// Continue a company that was paused at the Pharmcube credit cap.
-// Uses the saved call history so Pharmcube is NOT re-billed.
+// Continue screening a company that previously returned inconclusive.
 async function continueCompanyScreening(companyId) {
   const company = state.companies.find(c => c.id === companyId);
   if (!company || !company.pausedState) return;
@@ -590,11 +589,11 @@ async function runRescreening() {
 
   async function rescreenOne(company) {
     const websiteUrl = state.websiteInputs[company.id] || company.website || null;
-    // If the company wasn't found in Citeline/Pharmcube, skip the database lookup
+    // If the company wasn't found in Citeline, skip the database lookup
     // and go straight to the website input track with the user-provided URL
-    const notFoundInDatabase = /not found in (citeline|pharmcube)/i.test(company.inconclusiveReason || '')
+    const notFoundInDatabase = /not found in citeline/i.test(company.inconclusiveReason || '')
       || company.sourceTrack === 'website-input';
-    const skipPharmcube = notFoundInDatabase;
+    const skipCiteline = notFoundInDatabase;
     try {
       const resp = await fetch('/api/screen', {
         method: 'POST',
@@ -603,7 +602,7 @@ async function runRescreening() {
           company: company.name,
           runId: state.currentRunId,
           websiteUrl,
-          skipPharmcube,
+          skipCiteline,
         }),
       });
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);

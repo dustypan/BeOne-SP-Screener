@@ -580,79 +580,10 @@ adc-novel-payload now also auto-detected from drugOverview when payload text is 
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Base prompt â€” Steps 3+4+5 logic shared by all tracks.
-// CITELINE_PRIMARY_PROMPT slices from the Step 3 marker onward and prepends its own header.
+// Each track prepends its own header + Steps 1+2 instructions.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-const PHARMCUBE_PRIMARY_PROMPT = `
-You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
-
-CONTEXT: PRIMARY TRACK â€” Pharmcube MCP (Steps 1â€“3) + OneBD Cortellis deals (Steps 4â€“5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologics discovery) and Step 3 (competitive overlap) use Pharmcube drugBaseLiteCN. Steps 4 (licensing/rights) and 5 (manufacturing) use OneBD Cortellis deal data via onebd_resolve_company + onebd_get_deals.
-
-OBJECTIVE: Screen through Steps 1+2 â†' 3 â†' 4 â†' 5 in order. If the company is NOT FOUND in Pharmcube, return inconclusive immediately â€” do NOT search the web. The secondary research track will handle it.
-
-â•â•â• STEPS 1 + 2 â€” Oncology Biologic Identification (call drugBaseLiteCN FIRST) â•â•â•
-
-Call drugBaseLiteCN with:
-  companyName = the given company name
-  pageNo = 0, pageSize = 20
-  drugType2 = ["ç”Ÿç‰©"]        â† biologics only (avoids charges for small molecules)
-  diseaseArea = "è‚¿ç˜¤é¢†åŸŸ"    â† oncology only (avoids charges for non-oncology assets)
-  status = ["Active","Unknown"] â† exclude Inactive (abandoned) assets upfront
-
-If the response contains a totalCount > 20, make EXACTLY ONE additional call:
-  pageNo = 1, pageSize = 10  â† gets records 21â€“30 (max 10 more Ã— 15 pts = 150 pts)
-  (same filters: drugType2, diseaseArea, status)
-Do NOT paginate beyond page 1 regardless of totalCount. Cap = 30 records total.
-
-Filter results to qualifying assets where ALL of:
-  (a) disease_area contains oncology/tumor indication
-      â€” è‚¿ç˜¤é¢†åŸŸ, è‚¿ç˜¤, tumor, cancer, leukemia, lymphoma, carcinoma, sarcoma, etc.
-  (b) drug_type_2 = "ç”Ÿç‰©" (Biologic)
-  (c) drug_type_3 / modality is a qualifying CHO-expressed format:
-  (d) status â‰  "Inactive" â€” silently drop Inactive assets (officially abandoned or >6yr no progress); keep Active and Unknown
-
-QUALIFYING (CHO â€” these count):
-  æŠ—ä½“ / Monoclonal antibody      â†' mAb
-  åŒç‰¹å¼‚æ€§æŠ—ä½“ / Bispecific        â†' bsAb
-  ä¸‰ç‰¹å¼‚æ€§æŠ—ä½“ / Trispecific       â†' tsAb
-  æŠ—ä½“å¶è”è¯ç‰© / ADC               â†' ADC
-  Tç»†èƒžè¡”æŽ¥å™¨ / T cell engager     â†' TCE
-  NKç»†èƒžè¡”æŽ¥å™¨ / NK cell engager   â†' NKCE
-  æŠ—ä½“èžåˆè›‹ç™½ / Fcèžåˆè›‹ç™½         â†' Fc-fusion
-  å…ç–«ç»†èƒžå› å­ / Immunocytokine    â†' Immunocytokine
-
-EXCLUDED (NOT CHO â€” do not qualify):
-  å•åŸŸæŠ—ä½“ / VHH / nanobody        â€” yeast/microbial expressed
-  mRNAç–—æ³• / mRNA / LNP            â€” in vitro transcription
-  CAR-T / CAR-NK / TCR-T           â€” cell therapy
-  åŒ–è¯ / å°åˆ†å­ / Small molecule    â€” not a biologic
-  å¤šè‚½ / Peptide
-  å…¶ä»– (Other) with clearly non-CHO description â†' exclude; genuinely ambiguous â†' mark asset inconclusive, continue with company
-
-Per qualifying asset, save: name, modality (English term), target(s), indication (English), latest_phase, status (Active/Unknown/Inactive).
-
-OUTCOMES from Steps 1+2:
-  (A) drugBaseLiteCN returns zero results for this company â†'
-      Before concluding "not found", make exactly ONE fallback call with common corporate suffixes
-      stripped from the name. Strip any trailing: Bio, Biotech, Biosciences, Biotherapeutics,
-      Therapeutics, Pharma, Pharmaceuticals, Sciences, Medicine, Medicines, Inc, Ltd, Corp, Co,
-      Group, Holdings, Oncology, Immunology, Genomics. Strip only one suffix per retry
-      (e.g. "Hanchor Bio" â†' "Hanchor"). Then re-call drugBaseLiteCN with the stripped name and the same filters (drugType2, diseaseArea, status).
-      Sanity check: if results come back, confirm that the company name field in at least one
-      result plausibly matches the original query (shared word root, Chinese name phonetically
-      similar, or English alias). If no plausible match, treat as not found.
-      If still zero results after the one retry â†' DISAMBIGUATION STEP before routing to secondary:
-        Make ONE more call: drugBaseLiteCN with companyName only (NO drugType2, NO diseaseArea filters), pageSize: 1.
-        â€” If this returns â‰¥1 result â†' company EXISTS in Pharmcube, just has no oncology biologics
-            â†' return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube (company exists but pipeline is non-oncology or non-biologic)"
-        â€” If this also returns 0 â†' company genuinely not in Pharmcube
-            â†' return: status="inconclusive", inconclusiveReason="Company not found in Pharmcube â€” route to secondary track"
-      Total cap: 3 drugBaseLiteCN calls (2 filtered + 1 unfiltered existence check). Do NOT try web searches.
-  (B) Results found, â‰¥1 qualifying oncology biologic asset â†' proceed to Step 3
-  (C) Results found, zero qualifying assets (all non-oncology, all small-molecule, all excluded modalities, or all Inactive) â†'
-      Return: status="excluded", excludedAt="step1-2", excludedReason="No qualifying oncology biologic assets in Pharmcube"
-      If all assets were Inactive, set excludedReason="All oncology biologic assets are Inactive (abandoned or >6yr no progress)"
-
+const BASE_STEPS_345_PROMPT = `
 â•â•â• STEP 3 â€” COMPETITIVE OVERLAP (no API call â€” pure data check, run immediately after Steps 1+2) â•â•â•
 
 Before making any further API calls, check each qualifying asset from Steps 1+2 against the BeOne pipeline below. This eliminates direct competitors cheaply before the expensive licensing and manufacturing checks.
@@ -861,14 +792,11 @@ SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 â€
     Example: 14 assets screened out + 1 asset passes Step 5 â†' company QUALIFIES on that asset.
     Never set status="excluded" while any single asset still has overallStatus="qualifying".
 
-  â€” Always call drugBaseLiteCN BEFORE any OneBD tool
-  â€” drugBaseLiteCN: max 2 calls total (exact name + one suffix-stripped retry if zero results)
-  â€” If still not found after retry: return inconclusive immediately
   â€” Run Step 3 (competitive overlap) BEFORE calling OneBD â€” it's free and eliminates assets early
   â€” onebd_resolve_company: call ONCE per company
   â€” onebd_get_deals: MANDATORY immediately after resolve returns found:true â€” call ONCE, never skip
   â€” Steps 4 and 5 both use the SAME deal batch from onebd_get_deals â€” no additional OneBD calls
-  â€” Match deals to Pharmcube assets by name (fuzzy) â€” no asset-level OneBD resolution needed
+  â€” Match deals to Citeline assets by name (fuzzy) â€” no asset-level OneBD resolution needed
   â€” Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
   â€” Use NCI-standard target names: PD-1 (not PD1), HER2 (not ERBB2), EGFR, CD3, CD19, etc.
   â€” Return ONLY valid JSON at end â€” no text before or after it
@@ -881,7 +809,7 @@ SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 â€
   "type": "public" | "private" | "unknown",
   "website": "url or null",
   "status": "qualifying" | "excluded" | "inconclusive",
-  "sourceTrack": "pharmcube",
+  "sourceTrack": "citeline",
   "excludedAt": null | "pre-filter" | "step1-2" | "step3" | "step4" | "step5",
   "excludedReason": "plain-language reason",
   "excludedSource": "url of press release or deal record confirming exclusion, if applicable",
@@ -927,10 +855,10 @@ SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 â€
   "researchNotes": "",
   "sources": [
     {
-      "url": "pharmcube:drugBaseLiteCN",
-      "label": "Pharmcube drugBaseLiteCN",
+      "url": "citeline:sql",
+      "label": "Citeline database",
       "usedFor": "Steps 1+2 â€” oncology biologic identification",
-      "type": "pharmcube"
+      "type": "citeline"
     }
   ]
 }
@@ -939,16 +867,16 @@ Notes on the asset schema:
   layer3 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer3.status = "inconclusive", reason = "No target â€” not applicable".
   layer4 = Step 4 rights check. Only fill for assets that passed Step 3 (not competed out). For assets eliminated at Step 3, leave layer4/layer5 as null or omit.
   layer5 = Step 5 manufacturing check. Only fill for assets that passed Steps 3+4.
-  For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" as url placeholder.
+  For Citeline track, use "citeline:sql" as url placeholder in sources[].
   For OneBD calls in sources[], use "onebd:cortellis-deals" as url placeholder.
 `.trim();
 
-// Derived from PHARMCUBE_PRIMARY_PROMPT â€” identical Steps 3+4+5 logic, header replaced.
+// Derived from BASE_STEPS_345_PROMPT â€” identical Steps 3+4+5 logic, header replaced.
 // Steps 1+2 data is pre-loaded from Citeline SQL and passed in the user message.
 const CITELINE_PRIMARY_PROMPT = (() => {
   const step3Marker = 'â•â•â• STEP 3 â€” COMPETITIVE OVERLAP';
-  const idx = PHARMCUBE_PRIMARY_PROMPT.indexOf(step3Marker);
-  const body = idx !== -1 ? PHARMCUBE_PRIMARY_PROMPT.slice(idx) : PHARMCUBE_PRIMARY_PROMPT;
+  const idx = BASE_STEPS_345_PROMPT.indexOf(step3Marker);
+  const body = idx !== -1 ? BASE_STEPS_345_PROMPT.slice(idx) : BASE_STEPS_345_PROMPT;
   return (
     `You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
@@ -958,9 +886,9 @@ OBJECTIVE: Use the Citeline asset list provided. Do NOT call any pipeline lookup
 
 ${body}`
   )
-    .replace('"sourceTrack": "pharmcube"', '"sourceTrack": "citeline"')
+    .replace('"sourceTrack": "citeline"', '"sourceTrack": "citeline"')
     .replace(
-      'For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" as url placeholder.',
+      'For Citeline track, use "citeline:sql" as url placeholder in sources[].',
       'Steps 1+2 source: Citeline SQL (use "citeline:sql" as url placeholder in sources[]).',
     )
     .trim();
@@ -970,8 +898,8 @@ ${body}`
 // No web_search available. Derived from the same Steps 3+4+5 body as the other prompts.
 const WEBSITE_INPUT_SYSTEM_PROMPT = (() => {
   const step3Marker = 'â•â•â• STEP 3 â€” COMPETITIVE OVERLAP';
-  const idx = PHARMCUBE_PRIMARY_PROMPT.indexOf(step3Marker);
-  const body = idx !== -1 ? PHARMCUBE_PRIMARY_PROMPT.slice(idx) : PHARMCUBE_PRIMARY_PROMPT;
+  const idx = BASE_STEPS_345_PROMPT.indexOf(step3Marker);
+  const body = idx !== -1 ? BASE_STEPS_345_PROMPT.slice(idx) : BASE_STEPS_345_PROMPT;
   return (
     `You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
@@ -996,9 +924,9 @@ STEPS 1+2 â€” PIPELINE DISCOVERY FROM URL:
 
 ${body}`
   )
-    .replace('"sourceTrack": "pharmcube"', '"sourceTrack": "website-input"')
+    .replace('"sourceTrack": "citeline"', '"sourceTrack": "website-input"')
     .replace(
-      'For Pharmcube tool calls in sources[], use "pharmcube:drugBaseLiteCN" as url placeholder.',
+      'For Citeline track, use "citeline:sql" as url placeholder in sources[].',
       'Steps 1+2 source: user-supplied URL (add the fetched URL in sources[] with type "company-website").',
     )
     .trim();
@@ -2723,7 +2651,7 @@ app.get('/api/runs/:id', async (req, res) => {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.post('/api/screen', async (req, res) => {
-  const { company, runId, websiteUrl, skipPharmcube } = req.body;
+  const { company, runId, websiteUrl, skipCiteline } = req.body;
   if (!company) return res.status(400).json({ error: 'Missing company name' });
 
   const apiKey = process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
@@ -2734,7 +2662,7 @@ app.post('/api/screen', async (req, res) => {
   try {
     const client = new Anthropic({ apiKey, maxRetries: 5 });
 
-    const result = await screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipPharmcube });
+    const result = await screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipCiteline });
     applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' â€” ' + result.inconclusiveReason : ''}`);
