@@ -1553,6 +1553,11 @@ function closeNameMatch(searchName, citeName) {
   // Allow containment (e.g. "Zymeworks BC" contains "Zymeworks")
   if (a.length > 3 && b.includes(a)) return true;
   if (b.length > 3 && a.includes(b)) return true;
+  // Stem match: strip ALL company-type descriptors (Biologics, Therapeutics, etc.)
+  // so "Duality Biologics" matches "Duality Biosciences" — the brand name is what matters
+  const sa = stemCompany(searchName);
+  const sb = stemCompany(citeName);
+  if (sa && sb && sa.length >= 4 && sa === sb) return true;
   return false;
 }
 
@@ -2022,6 +2027,189 @@ Return ONLY this JSON, nothing else:
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function screenWithCitelinePrimary(companyName, client) {
+  console.log(`    [${companyName}] [citeline] querying Citeline SQL...`);
+  const { rows, coverageStatus, companyWebsite, pipelineUrl, nonQualifyingModalities } = await citelineGetAssets(companyName);
+
+  if (coverageStatus !== 'qualifying') {
+    if (coverageStatus === 'inconclusive-not-found') {
+      console.log(`    [${companyName}] [citeline] company not found in Citeline — falling through`);
+      return null;
+    }
+    const modSample = (nonQualifyingModalities || []).slice(0, 3).join(', ');
+    const excludedReason = coverageStatus === 'excluded-small-molecule'
+      ? `No oncology biologics in Citeline — small molecule pipeline (${modSample})`
+      : `Biologic pipeline present but no anticancer indication in Citeline (${modSample})`;
+    console.log(`    [${companyName}] [citeline] ${excludedReason}`);
+    return {
+      name: companyName, id: slugify(companyName), type: 'unknown',
+      website: companyWebsite, status: 'excluded', sourceTrack: 'citeline',
+      excludedAt: 'Steps 1+2', excludedReason,
+      inconclusiveReason: '', assets: [], beoneAnalyzed: false, beoneOutcome: null,
+      flags: [], researchNotes: '', allSourcesConsulted: [], evidenceSnapshots: [],
+      sources: [{ url: 'citeline:sql', label: 'Citeline database (Steps 1+2)', usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline' }],
+    };
+  }
+
+  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
+
+  const allNDR = rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
+  const thinCoverage = rows.length <= 2
+    || rows.some(r => !r.targets || r.targets.trim() === '')
+    || allNDR;
+
+  const assetLines = rows.map((r, i) => {
+    const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
+    const phase    = CITELINE_PHASE_MAP[r.citelinePhase] || r.citelinePhase || 'Unknown';
+    return (
+      `[${i + 1}] ${r.drug} (drugId: ${r.drugId})\n` +
+      `  AltNames   : ${r.altNames || 'None'}\n` +
+      `  Modality   : ${modality} (Citeline: ${r.citelineModality})\n` +
+      `  MOA/Targets: ${r.targets || 'Undisclosed'}\n` +
+      `  Indications: ${r.indications || 'Not specified'}\n` +
+      `  Phase      : ${phase}\n` +
+      `  Status     : ${r.status}`
+    );
+  }).join('\n\n');
+
+  // For thin-coverage companies pre-fetch the pipeline page
+  let websiteContent = null;
+  let fetchedPipelineUrl = null;
+  if (thinCoverage && (pipelineUrl || companyWebsite)) {
+    const timeout15s = new Promise(resolve => setTimeout(() => resolve({ content: null, url: null }), 15000));
+    const fetchWork = (async () => {
+      if (pipelineUrl) {
+        console.log(`    [${companyName}] [citeline] thin-coverage pipeline URL: ${pipelineUrl}`);
+        try {
+          const content = await fetchWebpage(pipelineUrl);
+          if (content && content.length > 100) return { content, url: pipelineUrl };
+        } catch (e) {
+          console.log(`    [${companyName}] [citeline] pipeline URL fetch failed: ${e.message}`);
+        }
+      }
+      if (companyWebsite) {
+        console.log(`    [${companyName}] [citeline] thin-coverage crawling homepage: ${companyWebsite}`);
+        try {
+          const fetched = await findAndFetchPipelinePage(companyWebsite);
+          if (fetched && fetched.content && fetched.content.length > 100) return fetched;
+        } catch (e) {
+          console.log(`    [${companyName}] [citeline] homepage crawl failed: ${e.message}`);
+        }
+      }
+      return { content: null, url: null };
+    })();
+    const { content, url } = await Promise.race([fetchWork, timeout15s]);
+    if (content) {
+      websiteContent = content;
+      fetchedPipelineUrl = url;
+      console.log(`    [${companyName}] [citeline] pipeline page fetched (${content.length} chars) from ${url}`);
+    } else {
+      console.log(`    [${companyName}] [citeline] pipeline fetch timed out or empty — proceeding without`);
+    }
+  }
+
+  const thinCoverageInstruction = thinCoverage && websiteContent
+    ? `THIN COVERAGE — MERGE ASSETS FROM BOTH SOURCES:\nCiteline data is sparse (${allNDR ? 'all NDR' : rows.length <= 2 ? `only ${rows.length} asset(s)` : 'missing targets'}). Pipeline page pre-fetched below.\nMerge Citeline assets with website assets into one list, then run Steps 3–5.\n\nPIPELINE PAGE (${fetchedPipelineUrl}):\n${'─'.repeat(60)}\n${websiteContent.slice(0, 8000)}\n${'─'.repeat(60)}`
+    : `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`;
+
+  const messages = [{
+    role: 'user',
+    content:
+      `Screen this company through the Citeline primary track: "${companyName}"\n\n` +
+      `CITELINE DATABASE — Steps 1+2 complete (${rows.length} qualifying oncology biologic assets):\n\n` +
+      `${assetLines}\n\n` +
+      `Company website: ${companyWebsite || '(not in Citeline)'}\n\n` +
+      thinCoverageInstruction,
+  }];
+
+  const fetchedUrls = [];
+  const evidenceSnapshots = [];
+  let oneBdCompanyId   = null;
+  let oneBdDealsFetched = false;
+
+  for (let i = 0; ; i++) {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 16000,
+      temperature: 0,
+      system: CITELINE_PRIMARY_PROMPT,
+      tools: CITELINE_TOOLS,
+      messages,
+    });
+    messages.push({ role: 'assistant', content: response.content });
+
+    if (response.stop_reason === 'end_turn') {
+      if (oneBdCompanyId && !oneBdDealsFetched) {
+        console.log(`    [${companyName}] [citeline] [guard] onebd_get_deals skipped — fetching now`);
+        let dealsOutput;
+        try { dealsOutput = await oneBdGetDealsForTool(oneBdCompanyId); oneBdDealsFetched = true; }
+        catch (e) { dealsOutput = JSON.stringify({ deals: [], error: e.message }); }
+        messages.push({ role: 'user', content:
+          `MANDATORY CORRECTION: You must call onebd_get_deals before producing output.\n` +
+          `Here are all Cortellis deals for this company (company_id=${oneBdCompanyId}):\n\n${dealsOutput}\n\n` +
+          `Apply Steps 4+5 using these deals, then return the complete revised JSON.` });
+        continue;
+      }
+      const textBlock = response.content.find(b => b.type === 'text');
+      const jsonMatch = textBlock && textBlock.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        messages.push({ role: 'user', content: 'Return ONLY the JSON screening result now — no other text.' });
+        continue;
+      }
+      const result = JSON.parse(jsonMatch[0]);
+      result.name        = companyName.replace(/BeiGene/gi, 'BeOne');
+      result.id          = slugify(companyName);
+      result.sourceTrack = 'citeline';
+      result.website     = result.website || companyWebsite || null;
+      if (result.beoneAnalyzed == null) result.beoneAnalyzed = false;
+      if (result.beoneOutcome  == null) result.beoneOutcome  = null;
+      if (!Array.isArray(result.flags)) result.flags = [];
+      if (!Array.isArray(result.deals)) result.deals = [];
+      if (thinCoverage && !result.flags.includes('thin-coverage')) result.flags.push('thin-coverage');
+      result.allSourcesConsulted = [...new Set(fetchedUrls)];
+      result.evidenceSnapshots   = evidenceSnapshots;
+      if (!Array.isArray(result.sources)) result.sources = [];
+      if (!result.sources.some(s => s.url === 'citeline:sql')) {
+        result.sources.unshift({ url: 'citeline:sql', label: 'Citeline database (Steps 1+2)', usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline' });
+      }
+      return result;
+    }
+
+    if (response.stop_reason === 'pause_turn') {
+      console.log(`    [${companyName}] [citeline] [pause_turn] iteration ${i + 1}`);
+      continue;
+    }
+
+    if (response.stop_reason === 'tool_use') {
+      const toolResults = [];
+      for (const toolUse of response.content.filter(b => b.type === 'tool_use')) {
+        console.log(`    [${companyName}] [citeline] [tool] ${toolUse.name}: ${JSON.stringify(toolUse.input).slice(0, 100)}`);
+        let output;
+        try {
+          if (toolUse.name === 'fetch_webpage') {
+            output = await fetchWebpage(toolUse.input.url, toolUse.input.section);
+            fetchedUrls.push(toolUse.input.url);
+          } else if (toolUse.name === 'onebd_resolve_company') {
+            output = await oneBdResolveCompanyForTool(toolUse.input.companyName);
+            try { const p = JSON.parse(output); if (p.found && p.id) oneBdCompanyId = p.id; } catch (_) {}
+          } else if (toolUse.name === 'onebd_get_deals') {
+            output = await oneBdGetDealsForTool(toolUse.input.companyId);
+            oneBdDealsFetched = true;
+          } else if (toolUse.name === 'onebd_resolve_asset') {
+            output = await oneBdResolveAssetForTool(toolUse.input.assetName);
+          } else {
+            output = `Unknown tool: ${toolUse.name}`;
+          }
+        } catch (e) { output = `Tool error: ${e.message}`; }
+        toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
+      }
+      messages.push({ role: 'user', content: toolResults });
+    } else if (response.stop_reason === 'max_tokens') {
+      messages.push({ role: 'user', content: 'Your output was cut off. Continue and complete the JSON screening result now.' });
+    } else {
+      console.log(`    [${companyName}] [citeline] [unexpected] stop_reason=${response.stop_reason} — breaking`);
+      break;
+    }
+  }
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2074,7 +2262,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   }
 
   // â”€â”€ PRIMARY TRACK: Citeline SQL (Steps 1+2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  if (!skipCiteline && DefaultAzureCredential) {
+  if (!skipCiteline && (citelineIndex || DefaultAzureCredential)) {
     console.log(`    [${companyName}] [primary-track] Citeline SQL`);
     let citelineResult = null;
     try {
