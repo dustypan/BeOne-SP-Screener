@@ -1565,14 +1565,42 @@ function closeNameMatch(searchName, citeName) {
   return false;
 }
 
-let citelineIndex   = null; // map: stemmedCompanyName
-let drugOverviewMap = {};   // map: drugId → drugOverview text â†' row[]
+let citelineByName  = null; // map: exact companyName → row[]
+let drugOverviewMap = {};   // map: drugId → drugOverview text
+
+// Extract the first meaningful word from a company name for broad-sweep matching.
+// Splits CamelCase so "JechoBio" → "jecho", "PrimeLink" → "prime"; skips leading
+// generics (bio/the/new) that would produce too many coincidental hits.
+function getRootWord(name) {
+  if (!name) return '';
+  const s = String(name)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')  // CamelCase → words
+    .toLowerCase().trim();
+  const skip = new Set(['the', 'bio', 'new']);
+  const words = s.split(/[\s\-]+/);
+  const root  = words.find(w => w.replace(/[^a-z0-9]/g, '').length >= 3 && !skip.has(w))
+             || words[0]
+             || '';
+  return root.replace(/[^a-z0-9]/g, '');
+}
+
+// All significant keywords from a name (used for lenient keyword-overlap matching).
+// "Leads BioLabs" → ["leads", "biolabs"]; single-char and generic words are skipped.
+function getAllKeywords(name) {
+  const skip = new Set(['the', 'bio', 'new']);
+  return String(name)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[\s\-]+/)
+    .map(w => w.replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length >= 3 && !skip.has(w));
+}
 
 function loadCitelineSpreadsheet() {
   const candidates = [
     path.join(__dirname, 'citeline-data', 'Citeline_Screener_Data.xlsx'),
     path.join(__dirname, 'Citeline_Screener_Data.xlsx'),
-    'C:/Users/arjun.shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
+    'C:/Users/arjun.Shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
   ];
   const filePath = candidates.find(p => fs.existsSync(p));
   if (!filePath) {
@@ -1585,59 +1613,68 @@ function loadCitelineSpreadsheet() {
   const sheetName = wb.SheetNames.includes('Sheet2') ? 'Sheet2' : wb.SheetNames[0];
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
 
-  citelineIndex   = {};
+  citelineByName  = {};
   drugOverviewMap = {};
   for (const row of rows) {
-    const stem = stemCompany(row.companyName);
-    if (!stem || stem.length < 2) continue;
-    if (!citelineIndex[stem]) citelineIndex[stem] = [];
-    citelineIndex[stem].push(row);
+    const cn = row.companyName;
+    if (!cn) continue;
+    if (!citelineByName[cn]) citelineByName[cn] = [];
+    citelineByName[cn].push(row);
     if (row.drugId && row.drugOverview && !drugOverviewMap[String(row.drugId)]) {
       drugOverviewMap[String(row.drugId)] = row.drugOverview;
     }
   }
-  console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineIndex).length} company stems`);
+  console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineByName).length} companies`);
 }
 
 const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
 
 function citelineGetAssetsLocal(companyName) {
-  const needle = stemCompany(companyName);
+  const root = getRootWord(companyName);
 
-  if (!needle || needle.length < 2) {
+  if (!root || root.length < 3) {
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Stem match: group index hits by company name, keep only those that pass
-  // the collision guard. This prevents a partial-stem hit on an unrelated company
-  // (e.g. "Prime Medicine" whose stem "prime" is contained in needle "primelink")
-  // from masking the correct entry ("PrimeLink BioTherapeutics").
-  const byCompany = {};
-  for (const [stem, rows] of Object.entries(citelineIndex)) {
-    if (stem === needle ||
-        (needle.length >= 4 && stem.length >= 4 && (stem.includes(needle) || needle.includes(stem)))) {
-      for (const row of rows) {
-        const cn = row.companyName || '';
-        if (!byCompany[cn]) byCompany[cn] = [];
-        byCompany[cn].push(row);
+  // Root-word substring search: find every Citeline company whose name contains
+  // the root word (case-insensitive). "JechoBio" → root "jecho" matches
+  // "Jecho Biopharmaceuticals"; "Primelink" → root "primelink" matches
+  // "PrimeLink BioTherapeutics" but not "Prime Medicine".
+  const candidates = Object.entries(citelineByName)
+    .filter(([cn]) => cn.toLowerCase().includes(root));
+
+  // Apply the close-name guard to reject coincidental substring hits
+  // (e.g. root "impact" would also match "PACT Pharma" without this filter).
+  let matchingCompanies = candidates
+    .filter(([cn]) => closeNameMatch(companyName, cn));
+
+  // Lenient fallback: city-prefix variants like "Nanjing Leadsbiolabs" for "Leads BioLabs".
+  // When closeNameMatch finds nothing, require ALL significant keywords from the query to
+  // appear inside the flattened (space-removed) candidate name.
+  if (matchingCompanies.length === 0 && candidates.length > 0) {
+    const keywords = getAllKeywords(companyName);
+    if (keywords.length >= 2) {
+      const overlap = candidates.filter(([cn]) => {
+        const flat = cn.toLowerCase().replace(/\s+/g, '');
+        return keywords.every(kw => flat.includes(kw));
+      });
+      if (overlap.length > 0) {
+        console.log(`    [${companyName}] [citeline] keyword-overlap match: ${overlap.map(([cn]) => cn).join(', ')}`);
+        matchingCompanies = overlap;
       }
     }
   }
 
-  // Filter to companies whose name actually matches the query
-  const matchingCompanies = Object.entries(byCompany)
-    .filter(([cn]) => closeNameMatch(companyName, cn));
-
   if (matchingCompanies.length === 0) {
-    // Check if any stem hit existed at all (for a better log message)
-    const anyHit = Object.keys(byCompany);
-    if (anyHit.length > 0) {
-      console.log(`    [${companyName}] [citeline] stem hits found (${anyHit.join(', ')}) but none pass name guard - routing to website input`);
+    if (candidates.length > 0) {
+      console.log(`    [${companyName}] [citeline] root "${root}" hit (${candidates.map(([cn]) => cn).slice(0, 5).join(', ')}) but none pass name guard - routing to website input`);
     }
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Use the best-matching company (prefer exact stem match; fall back to first)
+  // Pick best match: prefer the one whose stem equals the query stem (most specific),
+  // fall back to the first candidate.
+  const needle = stemCompany(companyName);
   const bestMatch = matchingCompanies.find(([cn]) => stemCompany(cn) === needle) || matchingCompanies[0];
   const citelineCompanyName = bestMatch[0];
   const matchedRows = bestMatch[1];
@@ -1707,7 +1744,7 @@ function citelineGetAssetsLocal(companyName) {
 }
 
 async function citelineGetAssets(companyName) {
-  if (citelineIndex) return citelineGetAssetsLocal(companyName);
+  if (citelineByName) return citelineGetAssetsLocal(companyName);
   const pool = await getCitelinePool();
   const result = await pool.request()
     .input('company', sql.NVarChar(200), companyName)
@@ -2338,7 +2375,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   }
 
   // â”€â”€ PRIMARY TRACK: Citeline SQL (Steps 1+2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  if (!skipCiteline && (citelineIndex || DefaultAzureCredential)) {
+  if (!skipCiteline && (citelineByName || DefaultAzureCredential)) {
     console.log(`    [${companyName}] [primary-track] Citeline SQL`);
     let citelineResult = null;
     try {
