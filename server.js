@@ -270,6 +270,16 @@ const WEBSITE_INPUT_TOOLS = [
   TOOLS.find(t => t.name === 'onebd_resolve_asset'),
 ].filter(Boolean);
 
+// Website input track with web_search fallback — used when no URL was provided.
+// Max 3 searches to locate the pipeline page, then proceeds identically to the URL track.
+const WEBSITE_INPUT_SEARCH_TOOLS = [
+  { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+  TOOLS.find(t => t.name === 'fetch_webpage'),
+  TOOLS.find(t => t.name === 'onebd_resolve_company'),
+  TOOLS.find(t => t.name === 'onebd_get_deals'),
+  TOOLS.find(t => t.name === 'onebd_resolve_asset'),
+].filter(Boolean);
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Citeline primary track tools - Steps 1+2 come from SQL; Steps 4+5 use OneBD
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -905,6 +915,17 @@ ${body}`
     .trim();
 })();
 
+// Search-mode variant — same rules as URL track but context tells Claude it has web_search.
+const WEBSITE_INPUT_SEARCH_SYSTEM_PROMPT = WEBSITE_INPUT_SYSTEM_PROMPT
+  .replace(
+    'You have two tools only: fetch_webpage (to read the URL) and OneBD tools (for Steps 4+5 deals). You have NO web_search tool - do not attempt to search the web.',
+    'You have web_search (max 3 uses to locate the pipeline page), fetch_webpage, and OneBD tools.'
+  )
+  .replace(
+    "OBJECTIVE: Fetch the provided URL to discover the company's pipeline (Steps 1+2), then run Steps 3 \u2192 4+5 in order.",
+    "OBJECTIVE: Search for the company's pipeline page, fetch it to discover the pipeline (Steps 1+2), then run Steps 3 \u2192 4+5 in order."
+  );
+
 // Website input track prompt - Steps 1+2 from user-supplied URL, Steps 3+4+5 via OneBD.
 // No web_search available. Derived from the same Steps 3+4+5 body as the other prompts.
 const WEBSITE_INPUT_SYSTEM_PROMPT = (() => {
@@ -930,7 +951,11 @@ STEPS 1+2 - PIPELINE DISCOVERY FROM URL:
    (a) Is it an oncology biologic? Qualifying modalities (CHO-expressed): mAb, bsAb, tsAb, ADC, TCE, NKCE, Fc-fusion, Immunocytokine.
    (b) Does the screened company manufacture the biologic drug substance (cell line/protein expression)?
        Exclude: AI/computational support only, payload/warhead-only suppliers, fill & finish only, CRO/regulatory consultant only.
-5. If the URL is unreadable, returns empty content, or contains no pipeline information, return immediately:
+5. PERMISSIVE SCREENING — if the page mentions a qualifying oncology biologic program (ADC, mAb, TCE, etc.) in a cancer area but does NOT list individually named drug candidates, specific targets, or clinical phases:
+   - Screen the company IN. Sparse data is NOT grounds for inconclusive.
+   - Create one asset per identifiable program: name = best description visible on the page (e.g. "anti-HER2 ADC" or "[Company] ADC Program"), modality = what the page states, indication = cancer area mentioned, targets = [] (empty — not disclosed), phase = "Not disclosed".
+   - Only return inconclusive if the page is completely unreadable OR contains zero mention of an oncology biologic program.
+6. If the URL is unreadable or shows no oncology biologic program at all, return immediately:
    status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 ${body}`
@@ -2346,39 +2371,47 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   }
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // â”€â”€ WEBSITE INPUT TRACK: user-provided URL, no web search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Only reached when skipCiteline=true (re-screening an inconclusive with a URL).
+  // ── WEBSITE INPUT TRACK ──────────────────────────────────────────────────────
+  // Reached when skipCiteline=true. Two sub-modes:
+  //   • URL provided  → fetch directly (no web_search)
+  //   • No URL        → use web_search (max 3) to find the pipeline page first
+  let _wsSystemPrompt, _wsTools, messages;
+
   if (!websiteUrl) {
-    // No URL provided - stay inconclusive
-    return {
-      id: slugify(companyName),
-      name: companyName.replace(/BeiGene/gi, 'BeOne'),
-      type: 'unknown',
-      website: null,
-      status: 'inconclusive',
-      sourceTrack: 'website-input',
-      excludedAt: null,
-      excludedReason: '',
-      excludedSource: '',
-      inconclusiveReason: 'Not found in Citeline database - website input needed',
-      assets: [],
-      deals: [],
-      beoneAnalyzed: false,
-      beoneOutcome: null,
-      flags: [],
-      externalSourcing: false,
-      externalSources: [],
-      researchNotes: '',
-      sources: [],
-    };
-  }
+    // No user-supplied URL and not skipped — search for the pipeline page.
+    console.log(`    [${companyName}] [website-input-track] No URL — searching for pipeline page`);
+    _wsSystemPrompt = WEBSITE_INPUT_SEARCH_SYSTEM_PROMPT;
+    _wsTools        = WEBSITE_INPUT_SEARCH_TOOLS;
+    messages = [
+      {
+        role: 'user',
+        content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"
 
-  console.log(`    [${companyName}] [website-input-track] Fetching user-supplied URL: ${websiteUrl}`);
+WEBSITE INPUT TRACK - NO URL PROVIDED: No pipeline URL was given. Use web_search to find it.
 
-  const messages = [
-    {
-      role: 'user',
-      content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"
+STEP 1: Search for the company's pipeline page.
+ - Try: "${companyName} pipeline", "${companyName} oncology program", "${companyName} biologics clinical"
+ - Maximum 3 web_search calls. Once you find a relevant company or pipeline URL, fetch it with fetch_webpage.
+ - If after 3 searches no oncology biologic pipeline is found, return: status="inconclusive", inconclusiveReason="No oncology pipeline found via web search"
+
+STEP 2: Extract all assets and check qualification as usual.
+PERMISSIVE: If the page shows a qualifying biologic in a cancer area but no named assets/targets, screen IN — create assets from what is visible.
+
+Then proceed to Steps 3, 4, 5.
+
+BUDGET: 9 tool calls max (≤3 searches + ≤2 fetches + resolve_company + get_deals + ≤2 asset resolves).
+Never end a turn with only a plan — make the tool call or return the JSON in the same turn.`
+      }
+    ];
+  } else {
+    // User-supplied URL — fetch directly, no web search needed.
+    console.log(`    [${companyName}] [website-input-track] Fetching user-supplied URL: ${websiteUrl}`);
+    _wsSystemPrompt = WEBSITE_INPUT_SYSTEM_PROMPT;
+    _wsTools        = WEBSITE_INPUT_TOOLS;
+    messages = [
+      {
+        role: 'user',
+        content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"
 
 WEBSITE INPUT TRACK - URL PROVIDED: ${websiteUrl}
 
@@ -2391,16 +2424,18 @@ STEP 1: Call fetch_webpage("${websiteUrl}") immediately to load the pipeline pag
 STEP 2: For each extracted asset, check:
   (a) Is it an oncology biologic? Qualifying: mAb, bsAb, tsAb, ADC, TCE, NKCE, Fc-fusion, Immunocytokine
   (b) Does the company manufacture the biologic drug substance? Exclude AI-only, payload-only, fill & finish only.
+PERMISSIVE: If the page mentions a qualifying biologic in a cancer area but no named assets or targets, screen IN — create assets from what is visible (modality, indication). Do not return inconclusive for sparse data.
 
-If the URL is unreadable or contains no pipeline data, return immediately:
+If the URL is completely unreadable or contains zero oncology biologic content, return:
   status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 Then proceed directly to Steps 3, 4, 5 (competitive overlap then OneBD deals).
 
 BUDGET: 6 tool calls max (up to 2 URL fetches + resolve_company + get_deals + up to 2 asset resolves).
 Never end a turn with only a plan - make the tool call or return the JSON in the same turn.`
-    }
-  ];
+      }
+    ];
+  }
 
   const collectedSources = [];
   const fetchedUrls = [];
@@ -2413,8 +2448,8 @@ Never end a turn with only a plan - make the tool call or return the JSON in the
       model: 'claude-sonnet-4-5',
       max_tokens: 8000,
       temperature: 0,
-      system: WEBSITE_INPUT_SYSTEM_PROMPT,
-      tools: WEBSITE_INPUT_TOOLS,
+      system: _wsSystemPrompt,
+      tools: _wsTools,
       messages,
     });
 
