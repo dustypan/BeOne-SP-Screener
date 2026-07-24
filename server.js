@@ -87,6 +87,34 @@ function assetScreenDecision(asset) {
   return { decision: 'screen_in', layer: null, reason: '' };
 }
 
+// Strips non-target descriptors from a targets array returned by Claude.
+// Mirrors the client-side normalizeTarget logic so DB, autoflag, and display
+// all agree on what counts as a real molecular target.
+const _NON_TARGET_EXACT_SVR = new Set([
+  'Undisclosed','Unknown','TBD','TAA','Various','Multiple',
+  'Antigen','Receptor','Tumor antigen','Tumor Antigen','Cancer antigen',
+  'Tumor Associated Antigen','Tumor-Associated Antigen',
+  'tumor-associated antigen','tumor associated antigen',
+  'Cell surface','Cell Surface','Surface antigen',
+  'Immune checkpoint','Checkpoint','Cytokine','Payload','Warhead',
+  'Undisclosed Target','Proprietary Target',
+]);
+const _NON_TARGET_PATTERNS_SVR = [
+  /^undisclosed$/i,
+  /\b(tumor|tumour)\b/i,
+  /cell[\s-]?surface/i,
+];
+function cleanTargetArray(targets) {
+  if (!Array.isArray(targets)) return targets;
+  return targets.filter(t => {
+    if (!t || !t.trim()) return false;
+    const s = t.trim();
+    if (_NON_TARGET_EXACT_SVR.has(s)) return false;
+    if (_NON_TARGET_PATTERNS_SVR.some(re => re.test(s))) return false;
+    return true;
+  });
+}
+
 /**
  * Insert one screened_companies row (with RETURNING id) then, for each
  * asset that Claude returned, insert a screened_assets row.
@@ -135,7 +163,7 @@ async function saveCompanyToDb(runId, result) {
           companyId,
           asset.name        || null,
           asset.modality    || null,
-          (asset.targets || []).join(', ') || null,
+          cleanTargetArray(asset.targets || []).join(', ') || null,
           asset.indication  || null,
           asset.isPlatform  || false,
           decision,
@@ -1396,8 +1424,16 @@ targets_agg AS (
   SELECT drugId, STRING_AGG(directMechanism, '; ') AS targets
   FROM CITELINE.drug_mechanismsOfAction
   WHERE directMechanism NOT IN (
-    'Immune checkpoint inhibitor','Immuno-oncology therapy','Antineoplastic','Antitumour','Cytotoxic'
+    'Immune checkpoint inhibitor','Immuno-oncology therapy','Antineoplastic','Antitumour','Cytotoxic',
+    'Unknown','TBD','TAA','Various','Multiple','Undisclosed','Antigen','Receptor',
+    'Tumor antigen','Tumor Antigen','Cancer antigen',
+    'Tumor Associated Antigen','Tumor-Associated Antigen',
+    'Cell surface','Cell Surface','Surface antigen',
+    'Immune checkpoint','Checkpoint','Cytokine'
   )
+  AND directMechanism NOT LIKE '%tumor%'
+  AND directMechanism NOT LIKE '%tumour%'
+  AND directMechanism NOT LIKE '%cell surface%'
   GROUP BY drugId
 ),
 indications_agg AS (
@@ -1904,7 +1940,7 @@ const OVERVIEW_ADC_RE            = /\b(antibody[- ]drug\s+conjugate|ADC|conjugat
 function computeFlagsFromAsset(asset, overview) {
   if (!asset || asset.overallStatus === 'excluded') return [];
   const flags   = new Set();
-  const targets  = (asset.targets || []).map(t => (t || '').toLowerCase());
+  const targets  = cleanTargetArray(asset.targets || []).map(t => (t || '').toLowerCase());
   const modality = (asset.modality || '').toLowerCase();
   const phase    = (asset.phase || '').toLowerCase();
   const ov       = overview || '';  // drugOverview text — second-check source

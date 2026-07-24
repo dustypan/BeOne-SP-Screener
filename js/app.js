@@ -372,10 +372,12 @@ function finishScreening(companies) {
 
 function renderSummary() {
   const { qualifying, excluded, inconclusive } = state.categories;
+  // Skipped companies are fully hidden from the final screen
+  const visibleInconclusive = inconclusive.filter(c => !state.skippedInconclusives.has(c.id));
 
   setCount('count-qualifying', qualifying.length);
   setCount('count-excluded', excluded.length);
-  setCount('count-inconclusive', inconclusive.length);
+  setCount('count-inconclusive', visibleInconclusive.length);
 
   renderBucketList('list-qualifying', qualifying, c =>
     `${(c.assets || []).filter(a => !a.layer3 || a.layer3.status !== 'fail').length} asset(s) qualifying`
@@ -388,8 +390,8 @@ function renderSummary() {
   (function() {
     const el = document.getElementById('list-inconclusive');
     if (!el) return;
-    if (inconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
-    el.innerHTML = inconclusive.map(c => {
+    if (visibleInconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
+    el.innerHTML = visibleInconclusive.map(c => {
       const reason = c.inconclusiveReason || 'Inconclusive';
       const isUnreadable = /website unreadable/i.test(reason);
       const badge = isUnreadable
@@ -828,9 +830,17 @@ const NON_TARGET_TERMS = new Set([
 function normalizeTarget(t) {
   if (!t || !t.trim()) return null;
   const s = t.trim();
+  // Bare "Undisclosed" variants (not caught by exact-match sets)
+  if (/^undisclosed$/i.test(s)) return null;
+  // Exact non-target terms
   if (NON_TARGET_TERMS.has(s)) return null;
   const mapped = TARGET_SYNONYMS[s];
   if (mapped === 'Undisclosed') return null;
+  // Pattern-based: anything containing "tumor"/"tumour" is a descriptor, not a target
+  const sl = s.toLowerCase();
+  if (/\b(tumor|tumour)\b/.test(sl)) return null;
+  // Pattern-based: "cell surface …" descriptors
+  if (/cell[\s-]?surface/.test(sl)) return null;
   return mapped || s;
 }
 
@@ -1487,6 +1497,8 @@ function renderInconclusivesFooter() {
   const items = (state.categories.inconclusive || []).filter(c => {
     if (seenIds.has(c.id)) return false;
     seenIds.add(c.id);
+    // Skipped companies are fully hidden from the final screen
+    if (state.skippedInconclusives.has(c.id)) return false;
     return true;
   });
 
