@@ -1844,61 +1844,32 @@ async function lookupClinicalTrialsForAsset(companyName, assetName) {
 
 // Indication Synergy keyword list - hematology, lung, GI (colorectal/stomach/gallbladder/pancreas),
 // women's cancers (breast/gyn). Prostate is explicitly NOT included.
-const INDICATION_SYNERGY_TERMS = [
-  // Hematology
-  'CLL', 'B-CLL', 'SLL', 'WM', 'Waldenstrom', 'WaldenstrÃ¶m', 'lymphoplasmacytic lymphoma',
-  'FL', 'Follicular Lymphoma', 'MCL', 'Mantle Cell Lymphoma', 'MZL', 'Marginal Zone Lymphoma',
-  'MALT lymphoma', 'NHL', 'Non-Hodgkin Lymphoma', 'MM', 'Multiple Myeloma', 'plasma cell myeloma',
-  'MDS', 'Myelodysplastic Syndrome', 'myelodysplasia', 'AML', 'Acute Myeloid Leukemia',
-  'acute myelogenous leukemia', 'B-cell malignancies',
+// Simple keyword list — any of these anywhere in the Indication column → synergy.
+// Prostate is excluded (not a BeOne focus). Everything else: if the word is there, it counts.
+const INDICATION_SYNERGY_KEYWORDS = [
   // Lung
-  'SCLC', 'Small Cell Lung Cancer', 'small cell lung carcinoma', 'NSCLC',
-  'Non-Small Cell Lung Cancer', 'lung adenocarcinoma', 'squamous cell lung carcinoma',
-  // GI - colorectal, stomach, gallbladder, pancreas, esophagus, biliary
-  'CRC', 'colorectal cancer', 'colorectal carcinoma', 'colon cancer', 'rectal cancer',
-  'ESCC', 'Esophageal Squamous Cell Carcinoma', 'esophageal cancer', 'esophageal adenocarcinoma',
-  'GC', 'Gastric Cancer', 'stomach cancer', 'stomach carcinoma',
-  'GEJC', 'Gastroesophageal Junction Cancer', 'GEJ cancer', 'GEA', 'Gastroesophageal Adenocarcinoma',
-  'HCC', 'Hepatocellular Carcinoma', 'liver cell carcinoma',
-  'NPC', 'Nasopharyngeal Carcinoma', 'nasopharyngeal cancer',
-  'BTC', 'Biliary Tract Cancer', 'cholangiocarcinoma', 'bile duct cancer', 'gallbladder cancer',
-  'pancreatic cancer', 'pancreatic ductal adenocarcinoma', 'PDAC', 'pancreatic carcinoma',
-  'MSI-H', 'Microsatellite Instability-High', 'MSI-high', 'dMMR', 'Deficient Mismatch Repair', 'MMR-deficient',
+  'lung',
+  // GI
+  'gastric', 'gastro', 'stomach', 'colorectal', 'colon', 'rectal',
+  'esophageal', 'esophagus', 'hepatocellular', 'liver cancer', 'liver carcinoma',
+  'pancreatic', 'pancreas', 'biliary', 'bile duct', 'cholangiocarcinoma', 'gallbladder',
+  'nasopharyngeal',
   // Women's cancers
-  'Breast cancer', 'breast carcinoma', 'HER2-positive breast cancer',
-  'triple-negative breast cancer', 'TNBC', 'ovarian cancer', 'ovarian carcinoma',
-  'cervical cancer', 'cervical carcinoma', 'endometrial cancer', 'endometrial carcinoma', 'uterine cancer',
+  'breast', 'ovarian', 'cervical', 'endometrial', 'uterine',
+  // Hematology
+  'lymphoma', 'leukemia', 'myeloma', 'myeloid', 'myelodysplastic', 'myelodysplasia',
+  // Biomarker-defined
+  'microsatellite', 'MSI-H', 'MSI-high', 'dMMR', 'mismatch repair',
 ];
 
-// Terms that must NEVER trigger indication-synergy — stripped before matching.
-// Prostate cancer: not a BeOne focus.
-// Solid tumor / advanced cancer / generic "cancer" alone: too broad, not a specific synergy signal.
-const PROSTATE_RE       = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
-const NON_SPECIFIC_RE   = /\b(solid\s+tumou?rs?|advanced\s+solid\s+tumou?r|unresectable\s+solid\s+tumou?r|metastatic\s+solid\s+tumou?r|refractory\s+solid\s+tumou?r|relapsed(?:\/refractory)?\s+solid\s+tumou?r|cancer,\s*solid[^;,]*|cancer,\s*nos|cancer\s+of\s+unknown\s+primary|occult\s+primary|CUP\b|advanced\s+cancer|refractory\s+cancer|metastatic\s+cancer)\b/gi;
+// Strip prostate mentions before checking — not a BeOne focus area.
+const PROSTATE_RE = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
 
-// Short abbreviations that are risky in free-text drugOverview because they have common
-// non-oncology meanings (GC = guanine-cytosine / gas chromatography, MM = millimeter,
-// FL = fluorescence, NHL = National Hockey League, AML = Anti-Money Laundering, etc.).
-// These are still reliable in structured Citeline indication data or ClinicalTrials conditions.
-// SCLC, NSCLC, TNBC, PDAC, ESCC, GEJC, MSI-H, dMMR are unambiguous oncology terms — left OUT.
-const SHORT_ABBREV_TERMS = new Set([
-  'GC','FL','MM','WM','SLL','MZL','BTC','NPC','CLL','B-CLL','NHL','MCL','GEA','HCC','CRC',
-  'MDS','AML',  // also Anti-Money Laundering / Motor Drive System
-  'MALT lymphoma', // "MALT" alone could appear in food-science contexts
-]);
-
-function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
-function stripNonSpecific(text) {
-  return text.replace(PROSTATE_RE, '').replace(NON_SPECIFIC_RE, '');
-}
-
-function matchesIndicationSynergy(text, overviewMode = false) {
+function matchesIndicationSynergy(text) {
   if (!text) return false;
-  const cleaned = stripNonSpecific(text);
-  return INDICATION_SYNERGY_TERMS
-    .filter(term => !overviewMode || !SHORT_ABBREV_TERMS.has(term))
-    .some(term => new RegExp(`\\b${escapeRegex(term)}\\b`, 'i').test(cleaned));
+  const cleaned = text.replace(PROSTATE_RE, '');
+  const lower   = cleaned.toLowerCase();
+  return INDICATION_SYNERGY_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
 }
 
 function computePhaseSynergy(asset, ctgov) {
