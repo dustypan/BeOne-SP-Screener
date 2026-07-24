@@ -1513,7 +1513,7 @@ function loadCitelineSpreadsheet() {
   drugOverviewMap = {};
   for (const row of rows) {
     const stem = stemCompany(row.companyName);
-    if (!stem || stem.length < 3) continue;
+    if (!stem || stem.length < 2) continue;
     if (!citelineIndex[stem]) citelineIndex[stem] = [];
     citelineIndex[stem].push(row);
     if (row.drugId && row.drugOverview && !drugOverviewMap[String(row.drugId)]) {
@@ -1528,7 +1528,7 @@ const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ce
 function citelineGetAssetsLocal(companyName) {
   const needle = stemCompany(companyName);
 
-  if (!needle || needle.length < 3) {
+  if (!needle || needle.length < 2) {
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
