@@ -387,18 +387,11 @@ function renderSummary() {
     const el = document.getElementById('list-inconclusive');
     if (!el) return;
     if (inconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
-    el.innerHTML = inconclusive.map(c => {
-      const reason = c.inconclusiveReason || 'Inconclusive';
-      const isUnreadable = /website unreadable/i.test(reason);
-      const badge = isUnreadable
-        ? '<span class="badge-unreadable">🔒 Unreadable</span>'
-        : '';
-      return `<div class="bucket-item">
+    el.innerHTML = inconclusive.map(c => `
+      <div class="bucket-item">
         <span class="bucket-company">${escHtml(c.name)}</span>
-        ${badge}
-        <span class="bucket-reason">${escHtml(reason)}</span>
-      </div>`;
-    }).join('');
+      </div>`
+    ).join('');
   })();
 }
 
@@ -522,13 +515,8 @@ function renderAsk1() {
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
-      ${needsWebsiteInput
-        ? `<span class="url-note">↗ Paste <strong>pipeline page URL</strong> (preferred) or company website below</span>`
-        : /website unreadable/i.test(c.inconclusiveReason || '')
-          ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL or skip</span>`
-          : `<span class="url-reason">${escHtml(c.inconclusiveReason || 'Not found in Citeline database')}</span>`}
       <div class="url-input-row">
-        <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
+        <input type="url" class="url-input" placeholder="https://company.com/pipeline"
           value="${escHtml(state.websiteInputs[c.id] || '')}"
           data-id="${escHtml(c.id)}"
           ${isSkipped ? 'disabled' : ''}>
