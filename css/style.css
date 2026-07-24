@@ -269,7 +269,7 @@ a:hover { text-decoration: underline; }
 
 .criteria-col {
   flex: 1;
-  padding: 20px 24px;
+  padding: 18px 22px;
 }
 
 .criteria-divider {
@@ -291,7 +291,7 @@ a:hover { text-decoration: underline; }
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
 .criteria-list li {
@@ -308,6 +308,8 @@ a:hover { text-decoration: underline; }
 .ci-info    { color: var(--navy);   font-weight: 700; flex-shrink: 0; }
 
 .criteria-list li strong { color: var(--navy-mid); font-weight: 600; }
+.how-label { font-weight: 600; color: var(--navy); white-space: nowrap; }
+.how-to-list li { align-items: flex-start; }
 
 .upload-intro h2 {
   font-size: 22px;

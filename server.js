@@ -2215,7 +2215,23 @@ function matchesBigPharma(companyName) {
 // Claude API call with tool loop
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// Strip characters that break prompt formatting when company names come from
+// external spreadsheets (smart quotes, em-dashes, control chars, etc.).
+function sanitizeCompanyName(name) {
+  if (!name || typeof name !== 'string') return name;
+  return name
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")  // smart single quotes
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')  // smart double quotes
+    .replace(/[\u2013\u2014\u2015]/g, '-')                       // en/em dash
+    .replace(/[\u00A0\u202F\u2009]/g, ' ')                       // non-breaking / narrow spaces
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')               // control characters
+    .replace(/[^\x20-\x7E\u00C0-\u024F\u4E00-\u9FFF\u3400-\u4DBF]/g, '') // keep printable + CJK
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function screenWithClaude(companyName, client, websiteUrl = null, opts = {}) {
+  companyName = sanitizeCompanyName(companyName) || companyName;
   const { skipCiteline = false } = opts;
 
   // Step 0 first â€” instant, no research needed, per the plan. Skips the Claude
