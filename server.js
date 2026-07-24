@@ -2782,6 +2782,25 @@ app.get('/api/runs/:id', async (req, res) => {
   }
 });
 
+// Bulk-sync company final statuses after Ask 1 re-screening.
+// Called once after runRescreening() completes to stamp every company's
+// final bucket (qualifying / excluded / inconclusive) into the DB,
+// including cached companies that were never individually saved.
+app.post('/api/runs/:id/sync', async (req, res) => {
+  try {
+    const runId = parseInt(req.params.id, 10);
+    if (!runId) return res.status(400).json({ error: 'Invalid run id' });
+    const { companies } = req.body;
+    if (!Array.isArray(companies)) return res.status(400).json({ error: 'companies must be an array' });
+
+    // Fire all saves concurrently (saveCompanyToDb uses ON CONFLICT ... DO UPDATE)
+    await Promise.all(companies.map(c => saveCompanyToDb(runId, c)));
+    res.json({ ok: true, saved: companies.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // API endpoint
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

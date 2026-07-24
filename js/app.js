@@ -954,6 +954,16 @@ function initWizard() {
     if (state.wizardStep === 1) {
       // Re-screen all inconclusives before moving to Ask 2
       await runRescreening();
+      // Stamp every company's final bucket into the DB so run history reflects
+      // the post-Ask-1 state (qualifying / excluded / inconclusive), not just
+      // the status from the initial screening pass.
+      if (state.currentRunId) {
+        fetch(`/api/runs/${state.currentRunId}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companies: state.companies }),
+        }).catch(() => {}); // fire-and-forget; history refresh picks up the update
+      }
       state.wizardStep = 2;
       showSection('section-wizard');
       renderWizardStep();
@@ -1987,6 +1997,11 @@ async function loadRun(runId) {
     const resp = await fetch(`/api/runs/${runId}`);
     if (!resp.ok) throw new Error('Run not found');
     const { companies } = await resp.json();
+
+    // Restore run ID so Ask 1 re-screens on this historical run are saved back
+    // to the correct DB record (without this, runId is null and saveCompanyToDb
+    // is skipped for every re-screen call).
+    state.currentRunId = runId;
 
     bar.style.width = '80%';
     label.textContent = 'Processing results…';
