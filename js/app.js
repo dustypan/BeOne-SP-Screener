@@ -5,7 +5,7 @@
 // returns the parsed JSON from the first `data:` line.
 // Keeps long screening requests alive through proxy timeouts.
 // ──────────────────────────────────────────────────────────────
-async function ssePost(url, body) {
+async function ssePost(url, body, onLog) {
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -19,16 +19,23 @@ async function ssePost(url, body) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const parsed = JSON.parse(line.slice(6));
-        if (parsed.error) throw new Error(parsed.error);
-        return parsed;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data: ')) continue;
+      const parsed = JSON.parse(line.slice(6));
+      if (parsed.type === 'log') {
+        if (onLog) onLog(parsed.text);
+      } else if (parsed.type === 'keepalive') {
+        // proxy-reset ping — ignore
+      } else {
+        // type === 'result' or legacy (no type field)
+        const data = parsed.data ?? parsed;
+        if (data.error) throw new Error(data.error);
+        return data;
       }
     }
-    const nl = buf.lastIndexOf('\n');
-    if (nl >= 0) buf = buf.slice(nl + 1);
   }
   throw new Error('Stream ended without result');
 }
@@ -45,6 +52,7 @@ const state = {
   // Screener output
   companies: [],          // all resolved companies (Excel names + COMPANY_DATA)
   categories: null,       // { qualifying, excluded, inconclusive }
+  companyLogs: {},        // companyId → string[] of raw console lines from screening
 
   // Wizard
   wizardStep: 1,
@@ -242,6 +250,8 @@ const SCREEN_CONCURRENCY = 4;
 
 async function runScreener(names) {
   showSection('section-loading');
+  clearLiveConsole();
+  state.companyLogs = {};
 
   const bar   = document.getElementById('progress-bar-fill');
   const label = document.getElementById('progress-label');
@@ -282,7 +292,11 @@ async function runScreener(names) {
     } else {
       // Not yet screened — call the server
       try {
-        const result = await ssePost('/api/screen', { company: name, runId: state.currentRunId });
+        const result = await ssePost(
+          '/api/screen',
+          { company: name, runId: state.currentRunId },
+          (text) => appendLiveConsoleLine(name, text)
+        );
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -620,12 +634,11 @@ async function runRescreening() {
       || company.sourceTrack === 'website-input';
     const skipCiteline = notFoundInDatabase;
     try {
-      const result = await ssePost('/api/screen', {
-        company: company.name,
-        runId: state.currentRunId,
-        websiteUrl,
-        skipCiteline,
-      });
+      const result = await ssePost(
+        '/api/screen',
+        { company: company.name, runId: state.currentRunId, websiteUrl, skipCiteline },
+        (text) => appendLiveConsoleLine(company.name, text)
+      );
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -1379,10 +1392,89 @@ function renderExcludedFooter() {
   });
 }
 
-function openConsoleModal(name, log) {
+// ──────────────────────────────────────────────────────────────
+// Live console — streams log lines during screening
+// ──────────────────────────────────────────────────────────────
+
+function classifyLogLine(text) {
+  if (/\[FINAL\].*qualifying/i.test(text))   return 'lc-qualifying';
+  if (/\[FINAL\].*excluded/i.test(text))     return 'lc-excluded';
+  if (/\[FINAL\].*inconclusive/i.test(text)) return 'lc-inconclusive';
+  if (/\[overall\].*qualifying/i.test(text)) return 'lc-qualifying';
+  if (/\[overall\].*excluded/i.test(text))   return 'lc-excluded';
+  if (/\[layer\d\].*\bpass\b/i.test(text))   return 'lc-pass';
+  if (/\[layer\d\].*\bfail\b/i.test(text))   return 'lc-fail';
+  if (/\[layer\d\]/i.test(text))             return 'lc-warn';
+  if (/\[tool\]/i.test(text))                return 'lc-tool';
+  if (/\[citeline\]/i.test(text))            return 'lc-citeline';
+  if (/─{5,}/.test(text))                    return 'lc-separator';
+  return '';
+}
+
+function appendLiveConsoleLine(companyName, text) {
+  const id = slugify(companyName);
+  if (!state.companyLogs[id]) state.companyLogs[id] = [];
+  const isFirst = state.companyLogs[id].length === 0;
+  state.companyLogs[id].push(text);
+
+  const panel = document.getElementById('live-console-output');
+  if (!panel) return;
+
+  if (isFirst) {
+    const hdr = document.createElement('div');
+    hdr.className = 'lc-company-header';
+    hdr.textContent = `── ${companyName} ──`;
+    panel.appendChild(hdr);
+  }
+  const div = document.createElement('div');
+  div.className = `lc-line ${classifyLogLine(text)}`;
+  div.textContent = text;
+  panel.appendChild(div);
+
+  // Auto-scroll if user is near the bottom
+  if (panel.scrollHeight - panel.scrollTop - panel.clientHeight < 80) {
+    panel.scrollTop = panel.scrollHeight;
+  }
+}
+
+function clearLiveConsole() {
+  const panel = document.getElementById('live-console-output');
+  if (panel) panel.innerHTML = '';
+}
+
+function renderConsoleLines(el, lines) {
+  el.innerHTML = '';
+  if (!lines || !lines.length) {
+    const d = document.createElement('div');
+    d.className = 'lc-line';
+    d.textContent = '(No log available)';
+    el.appendChild(d);
+    return;
+  }
+  lines.forEach(text => {
+    const div = document.createElement('div');
+    div.className = `lc-line ${classifyLogLine(text)}`;
+    div.textContent = text;
+    el.appendChild(div);
+  });
+}
+
+function openConsoleModal(name, logSource) {
   const modal = document.getElementById('console-modal');
   document.getElementById('console-modal-title').textContent = `Screening Console — ${name}`;
-  document.getElementById('console-modal-log').textContent = log || '(No log available)';
+  const logEl = document.getElementById('console-modal-log');
+
+  // Prefer live captured lines; fall back to post-processed screenerLog string
+  const id = slugify(name);
+  const liveLines = state.companyLogs[id];
+  if (liveLines && liveLines.length) {
+    renderConsoleLines(logEl, liveLines);
+  } else {
+    const lines = Array.isArray(logSource)
+      ? logSource
+      : (logSource || '').split('\n').filter(l => l.trim());
+    renderConsoleLines(logEl, lines);
+  }
   modal.classList.remove('hidden');
 }
 
@@ -1697,10 +1789,11 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
   btn.textContent = '⏳ Running…';
 
   try {
-    const result = await ssePost('/api/screen/website-track', {
-      companyName: company.name,
-      websiteUrl: websiteUrl || company.website || '',
-    });
+    const result = await ssePost(
+      '/api/screen/website-track',
+      { companyName: company.name, websiteUrl: websiteUrl || company.website || '' },
+      (text) => appendLiveConsoleLine(company.name, text)
+    );
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {

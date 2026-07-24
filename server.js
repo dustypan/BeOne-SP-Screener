@@ -12,6 +12,17 @@ let DefaultAzureCredential = null;
 try { ({ DefaultAzureCredential } = require('@azure/identity')); } catch (_) {}
 require('dotenv').config();
 
+// Per-request log streaming — captures console.log output and forwards it as
+// SSE events to the browser during live screening.
+const { AsyncLocalStorage } = require('async_hooks');
+const _screeningLogStore = new AsyncLocalStorage();
+const _origConsoleLog = console.log;
+console.log = (...args) => {
+  _origConsoleLog(...args);
+  const _cb = _screeningLogStore.getStore();
+  if (_cb) _cb(args.map(a => typeof a === 'string' ? a : String(a)).join(' '));
+};
+
 // Dev DB doesn't support SSL; prod (Replit deployment) requires it
 const pool = new Pool(
   process.env.REPLIT_DEPLOYMENT ? { ssl: { rejectUnauthorized: false } } : {}
@@ -2718,7 +2729,7 @@ app.post('/api/screen', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
-  const _ka = setInterval(() => res.write(': keepalive\n\n'), 20000);
+  const _ka = setInterval(() => res.write('data: {"type":"keepalive"}\n\n'), 5000);
   const sseEnd = (data) => { clearInterval(_ka); res.write(`data: ${JSON.stringify(data)}\n\n`); res.end(); };
 
   console.log(`\n${'â”€'.repeat(60)}\n[${company}] Screening: ${company}${websiteUrl ? ` (URL: ${websiteUrl})` : ''}\n${'â”€'.repeat(60)}`);
@@ -2726,13 +2737,16 @@ app.post('/api/screen', async (req, res) => {
   try {
     const client = new Anthropic({ apiKey, maxRetries: 5 });
 
-    const result = await screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipCiteline });
+    const result = await _screeningLogStore.run(
+      (text) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: 'log', text })}\n\n`); },
+      () => screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipCiteline })
+    );
     applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' - ' + result.inconclusiveReason : ''}`);
     result.screenerLog = buildScreenerLog(result);
     if (runId) saveCompanyToDb(runId, result);
-    sseEnd(result);
+    sseEnd({ type: 'result', data: result });
   } catch (err) {
     // Classify the error: transient (safe to re-run) vs. genuine failure.
     // Transient: 429/500/502/503/529 from Anthropic, explicit SDK error types,
@@ -2767,7 +2781,7 @@ app.post('/api/screen', async (req, res) => {
     };
     errorResult.screenerLog = buildScreenerLog(errorResult);
     if (runId) saveCompanyToDb(runId, errorResult);
-    sseEnd(errorResult);
+    sseEnd({ type: 'result', data: errorResult });
   }
 });
 
@@ -2792,22 +2806,25 @@ app.post('/api/screen/website-track', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
-  const _ka = setInterval(() => res.write(': keepalive\n\n'), 20000);
+  const _ka = setInterval(() => res.write('data: {"type":"keepalive"}\n\n'), 5000);
   const sseEnd = (data) => { clearInterval(_ka); res.write(`data: ${JSON.stringify(data)}\n\n`); res.end(); };
 
   console.log(`\n${'â”€'.repeat(60)}\n[${companyName}] Website Track (supplemental): ${websiteUrl}\n${'â”€'.repeat(60)}`);
 
   try {
     const client = new Anthropic({ apiKey, maxRetries: 5 });
-    const result = await screenWithClaude(companyName, client, websiteUrl, { skipCiteline: true });
+    const result = await _screeningLogStore.run(
+      (text) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: 'log', text })}\n\n`); },
+      () => screenWithClaude(companyName, client, websiteUrl, { skipCiteline: true })
+    );
     applyAutoFlags(result);
     logScreeningBreakdown(result);
     console.log(`    [${companyName}] [website-track FINAL] ${result.status}`);
     result.screenerLog = buildScreenerLog(result);
-    sseEnd(result);
+    sseEnd({ type: 'result', data: result });
   } catch (err) {
     console.error(`  [${companyName}] âœ— website-track: ${err.message}`);
-    sseEnd({ error: err.message });
+    sseEnd({ type: 'result', data: { error: err.message } });
   }
 });
 
