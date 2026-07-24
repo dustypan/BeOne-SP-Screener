@@ -36,8 +36,18 @@ const state = {
 // Persistence (localStorage)
 // ──────────────────────────────────────────────────────────────
 
-// ── API Key ────────────────────────────────────────────────────
-
+// ── SSE job helper ─────────────────────────────────────────────
+// The server returns { jobId } immediately; actual result arrives via SSE.
+function waitForJobResult(jobId) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/api/screen/${jobId}/events`);
+    es.addEventListener('result', e => {
+      es.close();
+      try { resolve(JSON.parse(e.data)); } catch (err) { reject(err); }
+    });
+    es.onerror = () => { es.close(); reject(new Error('SSE connection error')); };
+  });
+}
 
 // ───────────────────────────────────────────────────────────────
 
@@ -259,7 +269,8 @@ async function runScreener(names) {
 
         if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
 
-        const result = await resp.json();
+        const { jobId } = await resp.json();
+        const result = await waitForJobResult(jobId);
 
         // Compute Layer 5 for each asset
         for (const asset of result.assets || []) {
@@ -536,17 +547,17 @@ async function continueCompanyScreening(companyId) {
   if (btn) { btn.textContent = 'Running…'; btn.disabled = true; }
 
   try {
-    const resp = await fetch('/api/screen/resume', {
+    const resp = await fetch('/api/screen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company: company.name,
         runId: state.currentRunId,
-        pausedState: company.pausedState,
       }),
     });
     if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-    const result = await resp.json();
+    const { jobId: resumeJobId } = await resp.json();
+    const result = await waitForJobResult(resumeJobId);
     for (const asset of result.assets || []) {
       asset.layer3 = computeLayer3(asset);
     }
@@ -600,7 +611,8 @@ async function runRescreening() {
         }),
       });
       if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const result = await resp.json();
+      const { jobId: rescreenJobId } = await resp.json();
+      const result = await waitForJobResult(rescreenJobId);
       for (const asset of result.assets || []) {
         asset.layer3 = computeLayer3(asset);
       }
@@ -1711,7 +1723,8 @@ async function runWebsiteTrack(companyId, websiteUrl, btn) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.error || `HTTP ${resp.status}`);
     }
-    const result = await resp.json();
+    const { jobId: wtJobId } = await resp.json();
+    const result = await waitForJobResult(wtJobId);
 
     // Merge supplemental assets into existing company data
     if (result.assets && result.assets.length > 0) {
