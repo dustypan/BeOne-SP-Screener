@@ -1794,16 +1794,35 @@ const INDICATION_SYNERGY_TERMS = [
   'cervical cancer', 'cervical carcinoma', 'endometrial cancer', 'endometrial carcinoma', 'uterine cancer',
 ];
 
-// Prostate cancer is NOT a BeOne indication synergy focus - strip it before matching
-// so MSI-H prostate or other broad terms don't accidentally trigger the flag.
-const PROSTATE_RE = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
+// Terms that must NEVER trigger indication-synergy — stripped before matching.
+// Prostate cancer: not a BeOne focus.
+// Solid tumor / advanced cancer / generic "cancer" alone: too broad, not a specific synergy signal.
+const PROSTATE_RE       = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
+const NON_SPECIFIC_RE   = /\b(solid\s+tumou?rs?|advanced\s+solid\s+tumou?r|unresectable\s+solid\s+tumou?r|metastatic\s+solid\s+tumou?r|refractory\s+solid\s+tumou?r|relapsed(?:\/refractory)?\s+solid\s+tumou?r|cancer,\s*solid[^;,]*|cancer,\s*nos|cancer\s+of\s+unknown\s+primary|occult\s+primary|CUP\b|advanced\s+cancer|refractory\s+cancer|metastatic\s+cancer)\b/gi;
+
+// Short abbreviations that are risky in free-text drugOverview because they have common
+// non-oncology meanings (GC = guanine-cytosine / gas chromatography, MM = millimeter,
+// FL = fluorescence, NHL = National Hockey League, AML = Anti-Money Laundering, etc.).
+// These are still reliable in structured Citeline indication data or ClinicalTrials conditions.
+// SCLC, NSCLC, TNBC, PDAC, ESCC, GEJC, MSI-H, dMMR are unambiguous oncology terms — left OUT.
+const SHORT_ABBREV_TERMS = new Set([
+  'GC','FL','MM','WM','SLL','MZL','BTC','NPC','CLL','B-CLL','NHL','MCL','GEA','HCC','CRC',
+  'MDS','AML',  // also Anti-Money Laundering / Motor Drive System
+  'MALT lymphoma', // "MALT" alone could appear in food-science contexts
+]);
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-function matchesIndicationSynergy(text) {
+function stripNonSpecific(text) {
+  return text.replace(PROSTATE_RE, '').replace(NON_SPECIFIC_RE, '');
+}
+
+function matchesIndicationSynergy(text, overviewMode = false) {
   if (!text) return false;
-  const stripped = text.replace(PROSTATE_RE, '');
-  return INDICATION_SYNERGY_TERMS.some(term => new RegExp(`\\b${escapeRegex(term)}\\b`, 'i').test(stripped));
+  const cleaned = stripNonSpecific(text);
+  return INDICATION_SYNERGY_TERMS
+    .filter(term => !overviewMode || !SHORT_ABBREV_TERMS.has(term))
+    .some(term => new RegExp(`\\b${escapeRegex(term)}\\b`, 'i').test(cleaned));
 }
 
 function computePhaseSynergy(asset, ctgov) {
@@ -1851,8 +1870,10 @@ function computeFlagsFromAsset(asset, overview) {
   const ov       = overview || '';  // drugOverview text — second-check source
 
   // ── Indication synergy ────────────────────────────────────────────────────
-  // Primary: structured indication field. Second check: drugOverview text.
-  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(ov))
+  // Primary: structured indication field (all terms including abbreviations).
+  // Second check: drugOverview free text (long-form terms only — abbreviations
+  // like GC/FL/MM are too ambiguous in free text to be reliable).
+  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(ov, true))
     flags.add('indication-synergy');
 
   // ── Phase synergy ─────────────────────────────────────────────────────────
