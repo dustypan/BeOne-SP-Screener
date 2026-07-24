@@ -1885,10 +1885,9 @@ function computeFlagsFromAsset(asset, overview) {
   const ov       = overview || '';  // drugOverview text — second-check source
 
   // ── Indication synergy ────────────────────────────────────────────────────
-  // Primary: structured indication field (all terms including abbreviations).
-  // Second check: drugOverview free text (long-form terms only — abbreviations
-  // like GC/FL/MM are too ambiguous in free text to be reliable).
-  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(ov, true))
+  // Strictly the structured indication field only — what's shown in the
+  // Indications column.  drugOverview and ClinicalTrials are not consulted.
+  if (matchesIndicationSynergy(asset.indication || ''))
     flags.add('indication-synergy');
 
   // ── Phase synergy ─────────────────────────────────────────────────────────
@@ -2852,9 +2851,9 @@ app.post('/api/autoflag', async (req, res) => {
       const flags = new Set(asset.flags || []);
 
       const ctgov = await lookupClinicalTrialsForAsset(company.name, asset.name);
-      const indicationText = `${asset.indication || ''} ${(ctgov && ctgov.conditions || []).join(' ')}`;
 
-      if (matchesIndicationSynergy(indicationText)) flags.add('indication-synergy');
+      // Indication synergy: strictly the structured indication field only.
+      if (matchesIndicationSynergy(asset.indication || '')) flags.add('indication-synergy');
       else flags.delete('indication-synergy');
 
       if (computePhaseSynergy(asset, ctgov)) flags.add('phase-synergy');
