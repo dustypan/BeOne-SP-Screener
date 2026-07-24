@@ -18,7 +18,7 @@ const pool = new Pool(
 );
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Schema bootstrap â€” idempotent, safe to re-run on every start
+// Schema bootstrap - idempotent, safe to re-run on every start
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 pool.query(`
   CREATE TABLE IF NOT EXISTS screening_runs (
@@ -81,7 +81,7 @@ function assetScreenDecision(asset) {
  * asset that Claude returned, insert a screened_assets row.
  *
  * Company-level exclusions (pre-filter / layer1 / layer4) often have no
- * assets in the result â€” in that case the assets loop is a no-op and the
+ * assets in the result - in that case the assets loop is a no-op and the
  * company-level excluded_at column captures the reason.
  */
 async function saveCompanyToDb(runId, result) {
@@ -146,7 +146,7 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Passkey auth â€” simple token-in-cookie gate
+// Passkey auth - simple token-in-cookie gate
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const AUTH_TOKENS = new Set();   // in-memory; wiped on restart (forces re-login)
@@ -177,7 +177,7 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/auth/check â€” returns 200 if authed, 401 if not
+// GET /api/auth/check - returns 200 if authed, 401 if not
 app.get('/api/auth/check', requireAuth, (_req, res) => res.json({ ok: true }));
 
 // POST /api/auth/logout
@@ -215,15 +215,15 @@ app.use(express.static(__dirname));
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TOOLS = [
-  // Native, server-side â€” Anthropic runs the search on its own infrastructure.
+  // Native, server-side - Anthropic runs the search on its own infrastructure.
   // Resolved automatically; never hits our tool_use branch below. Using the
-  // older 20250305 version deliberately â€” 20260209 supports dynamic filtering,
+  // older 20250305 version deliberately - 20260209 supports dynamic filtering,
   // which requires tracking a code-execution container_id across turns; we
   // don't thread that through our loop, so it 400s once filtering kicks in.
   { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
   {
     name: 'fetch_webpage',
-    description: 'Fetch and read the text content of a specific webpage URL â€” the company website, its pipeline/news pages, or a known structured URL (ClinicalTrials.gov API, SEC EDGAR). For a SEC filing URL you already fetched once, you can re-fetch the SAME url with a different "section" to jump elsewhere in the document instead of re-reading from the start.',
+    description: 'Fetch and read the text content of a specific webpage URL - the company website, its pipeline/news pages, or a known structured URL (ClinicalTrials.gov API, SEC EDGAR). For a SEC filing URL you already fetched once, you can re-fetch the SAME url with a different "section" to jump elsewhere in the document instead of re-reading from the start.',
     input_schema: {
       type: 'object',
       properties: {
@@ -231,7 +231,7 @@ const TOOLS = [
         section: {
           type: 'string',
           enum: ['item1', 'item7', 'item2'],
-          description: 'SEC filings only: which section to jump to â€” item1 = Business (default), item7 = MD&A (rights/manufacturing fallback), item2 = Properties (own-facility check). Ignored for non-SEC URLs.'
+          description: 'SEC filings only: which section to jump to - item1 = Business (default), item7 = MD&A (rights/manufacturing fallback), item2 = Properties (own-facility check). Ignored for non-SEC URLs.'
         }
       },
       required: ['url']
@@ -239,7 +239,7 @@ const TOOLS = [
   },
   {
     name: 'lookup_sec_filing',
-    description: 'Given a US stock ticker symbol found on the company\'s own website, look up their exact CIK and return the direct URL to their most recent 10-K/20-F filing. Only call this with a ticker you actually found stated on the website â€” do not guess one.',
+    description: 'Given a US stock ticker symbol found on the company\'s own website, look up their exact CIK and return the direct URL to their most recent 10-K/20-F filing. Only call this with a ticker you actually found stated on the website - do not guess one.',
     input_schema: {
       type: 'object',
       properties: {
@@ -250,7 +250,7 @@ const TOOLS = [
   }
 ];
 
-// Website input track â€” fetch_webpage + OneBD only. No web_search.
+// Website input track - fetch_webpage + OneBD only. No web_search.
 // Used when re-screening a company that was not found in Citeline.
 const WEBSITE_INPUT_TOOLS = [
   TOOLS.find(t => t.name === 'fetch_webpage'),
@@ -260,13 +260,13 @@ const WEBSITE_INPUT_TOOLS = [
 ].filter(Boolean);
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Citeline primary track tools â€” Steps 1+2 come from SQL; Steps 4+5 use OneBD
+// Citeline primary track tools - Steps 1+2 come from SQL; Steps 4+5 use OneBD
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const CITELINE_TOOLS = [
   {
     name: 'fetch_webpage',
-    description: 'Fetch and read the text content of a specific webpage URL â€” use for the company pipeline/about page when thin-coverage enrichment is needed.',
+    description: 'Fetch and read the text content of a specific webpage URL - use for the company pipeline/about page when thin-coverage enrichment is needed.',
     input_schema: {
       type: 'object',
       properties: {
@@ -279,7 +279,7 @@ const CITELINE_TOOLS = [
     name: 'onebd_resolve_company',
     description: [
       'Resolve a company name to an OneBD Cortellis company record.',
-      'Call this ONCE before onebd_get_deals â€” it returns the company_id needed for deal lookup.',
+      'Call this ONCE before onebd_get_deals - it returns the company_id needed for deal lookup.',
       'If the company is not found, treat as "no Cortellis deal history" and proceed to Step 5 with no deals.',
     ].join('\n'),
     input_schema: {
@@ -338,70 +338,70 @@ manufacturing/licensing press releases not on the company's own site), fetch_web
 specific URL), and lookup_sec_filing (given a US ticker symbol you found stated on the
 company's website, returns the exact URL of their most recent 10-K/20-F).
 
-IMPORTANT â€” identification vs. evidence are two separate steps, not one. Finding the company's
+IMPORTANT - identification vs. evidence are two separate steps, not one. Finding the company's
 website with web_search (and confirming it's the right company / has an oncology program) is
-identification only â€” it is NOT automatically your evidence source for Layers 1-4. The actual
+identification only - it is NOT automatically your evidence source for Layers 1-4. The actual
 primary source for Layers 1-4 is a specific page you must separately locate and read, and which
 one depends on the RESEARCH TRACK, not just the "type" label:
 - SEC-FILING track (US-listed public companies only): their most recent 10-K/20-F filing, via
-  lookup_sec_filing â€” "Item 1. Business" (or equivalent) covers oncology relevance, modality,
+  lookup_sec_filing - "Item 1. Business" (or equivalent) covers oncology relevance, modality,
   rights, and manufacturing in one read.
-- IR-FILING track (non-US-listed public companies â€” HKEX/SSE/SZSE/TSX/ASX/etc.): their
+- IR-FILING track (non-US-listed public companies - HKEX/SSE/SZSE/TSX/ASX/etc.): their
   IR / Investor Relations page â†' most recent annual report or equivalent filing (å¹´å ±, å¹´åº¦æŠ¥å'Š,
   Annual Results, etc.) â†' Business/Operations section of that document. This is the primary
   source for all four layers, equivalent in role to Item 1 Business in a 10-K. Fall back to
   WEBSITE track only if the IR page or annual report cannot be reached.
 - WEBSITE track (private companies; fallback for non-US public when IR/annual report unreachable):
-  their dedicated pipeline / "Our Science" page â€” not the homepage. A homepage mentioning a
+  their dedicated pipeline / "Our Science" page - not the homepage. A homepage mentioning a
   lead candidate is not a substitute for actually reading the pipeline page.
 You may never skip this mandatory read just because an earlier page (e.g. the homepage) felt
-sufficient â€” see the per-company instructions for exactly when "stop once confident" is and
+sufficient - see the per-company instructions for exactly when "stop once confident" is and
 isn't allowed to apply.
 If the primary source leaves a layer genuinely ambiguous, ClinicalTrials.gov can help on
 indication/modality: https://clinicaltrials.gov/api/v2/studies?query.spons=COMPANY+NAME&pageSize=10&format=json
 
-RELEVANT MODALITIES (CHO/mammalian cell culture â€” these qualify):
+RELEVANT MODALITIES (CHO/mammalian cell culture - these qualify):
 mAb, bsAb, tsAb, ADC, TCE (T-cell engager, CD3-containing), NKCE (NK cell engager), Fc-fusion, Immunocytokine (cytokine fused to antibody/Fc for tumor targeting)
-Always normalize to exactly these terms â€” e.g. write "mAb", never "msAb" (monospecific antibody
+Always normalize to exactly these terms - e.g. write "mAb", never "msAb" (monospecific antibody
 is the same thing as mAb). Downstream competitor-matching does exact string comparison, so an
 unnormalized synonym silently breaks that check.
 
-EXCLUDED MODALITIES (different manufacturing â€” do not qualify):
+EXCLUDED MODALITIES (different manufacturing - do not qualify):
 Cell therapy (CAR-T, CAR-NK, TCR-T including allogeneic), LNP/mRNA biologics, yeast/microbial proteins (nanobodies, VHH, scFv), peptide therapeutics, small-molecule conjugates
 
-PRE-FILTERS â€” run before any layer evaluation, for every company:
+PRE-FILTERS - run before any layer evaluation, for every company:
 
 STEP 0: Big Pharma exclusion (instant, no research needed)
 Exclude immediately: AbbVie, Amgen, AstraZeneca, Pfizer, Roche, Genentech, Merck/MSD, Novartis, BMS, Sanofi, GSK, Eli Lilly, Takeda, Bayer, Gilead, Regeneron, Biogen, Daiichi Sankyo, Astellas, Boehringer Ingelheim, J&J/Janssen
 â†' excludedAt: "pre-filter"
 
-STEP 0b: Oncology pre-filter (quick scan, company-level â€” distinct from Layer 1's asset-level detail)
+STEP 0b: Oncology pre-filter (quick scan, company-level - distinct from Layer 1's asset-level detail)
 No oncology program anywhere in the company â†' excludedAt: "pre-filter"
 At least one oncology program â†' proceed to Layers 1-4
 Ambiguous or sparse source â†' do NOT exclude, fall through to Layers 1-4
 
-SCREENING LAYERS â€” evaluate in order only after both pre-filters pass, stop at first failure:
+SCREENING LAYERS - evaluate in order only after both pre-filters pass, stop at first failure:
 
-LAYER 1 â€” Oncology Relevance
+LAYER 1 - Oncology Relevance
 Pass: at least one asset targets a cancer indication
 Fail: no oncology programs â†' excludedAt: "layer1"
 
-LAYER 2 â€” Modality Confirmation
+LAYER 2 - Modality Confirmation
 Pass: has mAb/bsAb/tsAb/ADC/TCE/NKCE/Fc-fusion/Immunocytokine in CHO/mammalian expression
 Fail: only excluded modalities â†' excludedAt: "layer2"
 Platform record: if site describes a general oncology biologic platform without named candidates, create one asset with isPlatform: true
 Note: a mixed-modality pipeline (mostly small molecules but with some ADCs/mAbs) still passes if any qualifying asset exists. A company is only excluded at Layer 2 if NONE of its assets qualify.
 
-PARTIAL CONTRIBUTOR EDGE CASE â€” screen out at Layer 2 any asset where the screened company does NOT manufacture the biologic drug substance (cell line / protein expression). This applies when:
-- The company provides only the small molecule component of a biologic (e.g. ADC payload/warhead provider â€” they supply the toxin, not the antibody)
+PARTIAL CONTRIBUTOR EDGE CASE - screen out at Layer 2 any asset where the screened company does NOT manufacture the biologic drug substance (cell line / protein expression). This applies when:
+- The company provides only the small molecule component of a biologic (e.g. ADC payload/warhead provider - they supply the toxin, not the antibody)
 - The company provides only AI/computational drug discovery support for a biologic partnership (no wet lab, no cell line, no protein production)
 - The company provides only fill & finish / formulation / drug product (no drug substance / upstream bioreactor work)
 - The company is a clinical CRO, regulatory consultant, or platform licensor only
-Set layer2: fail, reason: "Company role is [X] only â€” does not manufacture biologic drug substance (cell line/protein expression)". Do NOT screen out co-developers who share manufacturing responsibilities or who have a manufacturing arm alongside their contribution.
+Set layer2: fail, reason: "Company role is [X] only - does not manufacture biologic drug substance (cell line/protein expression)". Do NOT screen out co-developers who share manufacturing responsibilities or who have a manufacturing arm alongside their contribution.
 
-ENUMERATE ALL ASSETS â€” list every individually named asset from the pipeline page as a separate asset object regardless of phase. Discovery, Preclinical, Lead Opt, IND-Enabling, Phase 1/2/3, Approved â€” all are included. If the table has 10 rows, output 10 objects. Do NOT filter by phase, do NOT collapse the pipeline into one representative asset, do NOT summarize as "several mAbs". Extract all rows from what you already fetched â€” do not make extra tool calls per asset.
+ENUMERATE ALL ASSETS - list every individually named asset from the pipeline page as a separate asset object regardless of phase. Discovery, Preclinical, Lead Opt, IND-Enabling, Phase 1/2/3, Approved - all are included. If the table has 10 rows, output 10 objects. Do NOT filter by phase, do NOT collapse the pipeline into one representative asset, do NOT summarize as "several mAbs". Extract all rows from what you already fetched - do not make extra tool calls per asset.
 
-LAYER 3 â€” Competitive Overlap (evaluate HERE, immediately after Layer 2, BEFORE Layers 4 and 5)
+LAYER 3 - Competitive Overlap (evaluate HERE, immediately after Layer 2, BEFORE Layers 4 and 5)
 Check each qualifying asset against the BeOne pipeline. Assets that are direct competitors are eliminated here so you do not waste research on their rights or manufacturing status.
 
 BEONE PIPELINE (modality + NCI-normalized targets):
@@ -420,81 +420,81 @@ BEONE PIPELINE (modality + NCI-normalized targets):
 
 Matching rules:
   HER2 "contains" rule: HER2 anywhere in the candidate's target list â†' competitive overlap with BeOne HER2 bsAb, regardless of modality or co-targets.
-  All others â€” exact multiset rule: candidate's modality AND full target set must exactly match a BEONE_PIPELINE entry. Partial overlap (one shared target of several, or same targets but different modality) does NOT match.
+  All others - exact multiset rule: candidate's modality AND full target set must exactly match a BEONE_PIPELINE entry. Partial overlap (one shared target of several, or same targets but different modality) does NOT match.
 
 Per asset:
   Match â†' layer3: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }, overallStatus: "excluded". Do NOT evaluate Layers 4+5 for this asset.
   No match â†' layer3: { status: "pass", reason: "No competitive overlap with BeOne pipeline" }. Proceed to Layer 4.
-  Platform-level record (no target) â†' layer3: { status: "inconclusive", reason: "No target â€” not applicable" }. Proceed to Layer 4.
+  Platform-level record (no target) â†' layer3: { status: "inconclusive", reason: "No target - not applicable" }. Proceed to Layer 4.
 
-LAYER 4 â€” Rights Retained
+LAYER 4 - Rights Retained
 Pass: company retains global or US rights for its qualifying assets
 Fail: global or US rights out-licensed via license deal, asset sale, or option
-Note: ex-US licensing only = still PASSES. A headline out-licensing deal for one asset does not mean all assets are out-licensed â€” if the company has other unlicensed qualifying assets, those still pass.
+Note: ex-US licensing only = still PASSES. A headline out-licensing deal for one asset does not mean all assets are out-licensed - if the company has other unlicensed qualifying assets, those still pass.
 
-LAYER 5 â€” US Manufacturing Screen
+LAYER 5 - US Manufacturing Screen
 Pass: no US drug substance manufacturing solution found for this asset
 Fail: has an active, asset-specific US CDMO relationship for drug substance manufacturing, OR owns a US biologics facility used for drug substance production â†' excludedAt: "layer5"
 
-RULE A â€” Drug substance only. BeOne's focus is drug substance (DS) manufacturing:
+RULE A - Drug substance only. BeOne's focus is drug substance (DS) manufacturing:
 bioreactor cell culture, upstream processing, fermentation, downstream processing, purification,
 bulk drug substance production. Fill & finish (F&F), formulation, vialing, labeling, packaging,
 finishing, and drug product (DP) steps handled by a separate contract organization do NOT
-constitute a manufacturing exclusion â€” those are downstream of what BeOne does. If a CDMO
+constitute a manufacturing exclusion - those are downstream of what BeOne does. If a CDMO
 relationship is explicitly described as fill & finish or drug product only â†' PASS Layer 4.
 If it is genuinely unclear whether a CDMO is doing DS or F&F â†' default to PASS, note in researchNotes.
 
-RULE B â€” Asset-level scope. A CDMO agreement covers only the specific asset it names.
+RULE B - Asset-level scope. A CDMO agreement covers only the specific asset it names.
 If a company has Asset A with a US DS CDMO and Asset B with no CDMO mentioned:
 â†' Asset A fails Layer 4; Asset B passes Layer 4. Never fail all of a company's assets
 because one asset has a manufacturing partner. Only set excludedAt: "layer4" at the company
 level if every qualifying asset fails Layer 4.
 
-RULE C â€” Recency and active status. Only rely on evidence from the two most recent annual
+RULE C - Recency and active status. Only rely on evidence from the two most recent annual
 filings (10-K or 20-F) or, for private companies, content from the last ~2 years. An agreement
 mentioned only in older documents that does not appear in either of the two most recent filings
-may have expired or been terminated â€” treat as PASS, note in researchNotes. If a termination,
+may have expired or been terminated - treat as PASS, note in researchNotes. If a termination,
 expiration, or non-renewal is explicitly documented â†' PASS. Agreements that renew on a fixed
 cycle (e.g. every 3 years) must be confirmed active in a recent filing to count as a fail.
 
-RULE D â€” Source required. Every Layer 4 fail MUST have the exact URL of the filing or press
+RULE D - Source required. Every Layer 4 fail MUST have the exact URL of the filing or press
 release confirming the active DS agreement in the layer's "source" field. A Layer 4 fail
-with no source is not valid â€” if you cannot cite a specific recent document, default to PASS.
+with no source is not valid - if you cannot cite a specific recent document, default to PASS.
 
 Named US CDMOs (drug substance operations): Lonza US, Samsung Biologics US, WuXi Biologics US,
 Thermo Fisher Biologics, Fujifilm Diosynth US, Catalent Biologics, Rentschler US, AGC Biologics US,
-Patheon (drug substance operations only â€” Patheon fill & finish does not count).
+Patheon (drug substance operations only - Patheon fill & finish does not count).
 Own US biologics facility (drug substance scale): excluded only if â‰¥200L bioreactor capacity
 confirmed. If capacity unstated â†' PASS, note in researchNotes.
-Default if ambiguous, budget exhausted, or time runs out: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Never return inconclusive on Layer 5 alone â€” the company still qualifies. Only exclude if clearly disclosed.
+Default if ambiguous, budget exhausted, or time runs out: PASS for that asset, add "check-mfg-partner" to company-level flags[]. Never return inconclusive on Layer 5 alone - the company still qualifies. Only exclude if clearly disclosed.
 
 RULES:
-- Return ONLY valid JSON at the end â€” no text before or after it
-- Every response you send must end with either a tool call or the final JSON object â€” never
+- Return ONLY valid JSON at the end - no text before or after it
+- Every response you send must end with either a tool call or the final JSON object - never
   both-less. If you write text describing what you found ("the website loaded, I can see X..."),
-  that description is not a complete response by itself â€” immediately continue in the SAME
+  that description is not a complete response by itself - immediately continue in the SAME
   response with your next tool call or the final JSON. Stopping after only a description, with
   no tool call and no JSON, is invalid and wastes a full extra turn correcting it.
-- Assess Layer 3 (competitive overlap) immediately after Layer 2 â€” BEFORE Layers 4+5. Assets that fail Layer 3 skip Layers 4+5 entirely.
-- ENUMERATE ASSETS: list every individually named asset as its own object in "assets" regardless of phase (Discovery/Preclinical/Lead Opt/IND-Enabling/clinical/approved â€” all count). Never collapse, never filter by phase, never write "several mAbs". Read the pipeline page once and extract all rows; do not make extra tool calls per individual asset.
+- Assess Layer 3 (competitive overlap) immediately after Layer 2 - BEFORE Layers 4+5. Assets that fail Layer 3 skip Layers 4+5 entirely.
+- ENUMERATE ASSETS: list every individually named asset as its own object in "assets" regardless of phase (Discovery/Preclinical/Lead Opt/IND-Enabling/clinical/approved - all count). Never collapse, never filter by phase, never write "several mAbs". Read the pipeline page once and extract all rows; do not make extra tool calls per individual asset.
 - If after all searching you cannot find reliable information: status = "inconclusive", inconclusiveReason = "Website Input Needed"
-- Be specific in reasons â€” cite what you found (e.g. "Lonza US manufacturing agreement announced March 2024 per press release")
+- Be specific in reasons - cite what you found (e.g. "Lonza US manufacturing agreement announced March 2024 per press release")
 - Whenever a specific page/filing/press release is the actual basis for a layer's pass/fail
-  (especially Layer 4 rights and Layer 5 manufacturing â€” the layers that actually drive
+  (especially Layer 4 rights and Layer 5 manufacturing - the layers that actually drive
   exclusions), put that exact URL in that layer's "source" field. If the company is excluded
   at the company level (excludedAt set), put the URL behind that reason in "excludedSource"
   too. Leave "source"/"excludedSource" empty if there genuinely isn't a single page it came
-  from (e.g. a Big Pharma pre-filter match, or a judgment call from general site browsing) â€”
+  from (e.g. a Big Pharma pre-filter match, or a judgment call from general site browsing) - 
   don't invent a URL just to fill the field.
 - Use NCI-standard target names (PD-1 not PD1, HER2 not ERBB2)
 - If the company is based in Greater China (mainland China, Hong Kong, Taiwan) or has a
   Chinese-language name: spend AT MOST 1 extra tool call specifically trying to find name
-  variants (Chinese legal name, exchange-listing/rebrand name) â€” usually visible on the
+  variants (Chinese legal name, exchange-listing/rebrand name) - usually visible on the
   homepage or an /about page you've likely already fetched, so this is often already known
   without any extra call. If a variant surfaces, reuse it in later searches this turn. If
-  nothing surfaces within that 1 extra call, proceed with the name you have â€” do not keep
+  nothing surfaces within that 1 extra call, proceed with the name you have - do not keep
   searching for name variants, this is a minor enhancement, not worth burning your budget on.
-- If the company's own website never loaded usable content and a likely-private company had to rely on external sources instead (press releases, conference abstracts, regulatory filings ONLY â€” never sales databases or generic explainers): set "externalSourcing": true and include "purple-flag" in "flags" once you have enough from at most 2-3 such sources. If those 2-3 sources aren't enough, do not keep digging â€” return "inconclusive" instead (see step 0a). This is a stricter, speed-first policy: don't fill gaps, don't guess, keep this company under ~30 seconds of research.
+- If the company's own website never loaded usable content and a likely-private company had to rely on external sources instead (press releases, conference abstracts, regulatory filings ONLY - never sales databases or generic explainers): set "externalSourcing": true and include "purple-flag" in "flags" once you have enough from at most 2-3 such sources. If those 2-3 sources aren't enough, do not keep digging - return "inconclusive" instead (see step 0a). This is a stricter, speed-first policy: don't fill gaps, don't guess, keep this company under ~30 seconds of research.
 
 REQUIRED JSON OUTPUT:
 {
@@ -504,7 +504,7 @@ REQUIRED JSON OUTPUT:
   "status": "qualifying" | "excluded" | "inconclusive",
   "excludedAt": null | "pre-filter" | "layer1" | "layer2" | "layer4" | "layer5",
   "excludedReason": "",
-  "excludedSource": "url or empty string â€” the specific page/filing/press release that is the basis for excludedReason, if there is one (leave empty for a Big Pharma pre-filter match, there's no source for that)",
+  "excludedSource": "url or empty string - the specific page/filing/press release that is the basis for excludedReason, if there is one (leave empty for a Big Pharma pre-filter match, there's no source for that)",
   "inconclusiveReason": "",
   "assets": [
     {
@@ -555,7 +555,7 @@ REQUIRED JSON OUTPUT:
   ]
 }
 
-SOURCES ARRAY â€” populate "sources" at the company level with EVERY URL you actually opened
+SOURCES ARRAY - populate "sources" at the company level with EVERY URL you actually opened
 (via fetch_webpage) or used as evidence (from a web_search result snippet). This includes:
 - The company's own website / pipeline page / IR page â†' type "company-website"
 - SEC filings, annual reports, 20-F / prospectus PDFs â†' type "filing"
@@ -565,26 +565,26 @@ Do NOT include URLs you fetched but found completely empty/unreadable. Include e
 that contributed any information to your assessment. Populate "usedFor" with which layer(s)
 or pre-filter step the source supported (e.g. "Layer 1â€“2 oncology/modality", "Layer 5 manufacturing",
 "Pre-filter: oncology confirmation", "Identification / website search").
-This field is REQUIRED â€” populate it for every company, even if the only source is the company website.
+This field is REQUIRED - populate it for every company, even if the only source is the company website.
 
-FLAGS â€” Claude sets these automatically:
-  "purple-flag" â€” set when externalSourcing is true (data from web_search/press/third-party
+FLAGS - Claude sets these automatically:
+  "purple-flag" - set when externalSourcing is true (data from web_search/press/third-party
     rather than the company's own site).
-  "check-mfg-partner" â€” set when Layer 5 manufacturing is ambiguous, budget is exhausted
+  "check-mfg-partner" - set when Layer 5 manufacturing is ambiguous, budget is exhausted
     without a clear answer, or the screen could not confirm/deny a US manufacturing partner
     for at least one qualifying asset. Company still screens IN when this flag is set.
 indication-synergy, phase-synergy, checkpoint-io-alt, and masked-tce-4-1bb are auto-computed
-server-side from asset data after screening â€” do not set these yourself.
+server-side from asset data after screening - do not set these yourself.
 adc-novel-payload now also auto-detected from drugOverview when payload text is clear.
 `.trim();
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Base prompt â€” Steps 3+4+5 logic shared by all tracks.
+// Base prompt - Steps 3+4+5 logic shared by all tracks.
 // Each track prepends its own header + Steps 1+2 instructions.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const BASE_STEPS_345_PROMPT = `
-â•â•â• STEP 3 â€” COMPETITIVE OVERLAP (no API call â€” pure data check, run immediately after Steps 1+2) â•â•â•
+â•â•â• STEP 3 - COMPETITIVE OVERLAP (no API call - pure data check, run immediately after Steps 1+2) â•â•â•
 
 Before making any further API calls, check each qualifying asset from Steps 1+2 against the BeOne pipeline below. This eliminates direct competitors cheaply before the expensive licensing and manufacturing checks.
 
@@ -606,7 +606,7 @@ MATCHING RULES:
   HER2 "contains" rule: if HER2 appears ANYWHERE in the candidate asset's target list â†' competitive
   overlap with BeOne HER2 bsAb, regardless of modality or other co-targets.
 
-  All other targets â€” exact multiset rule: the candidate's modality AND full target set must exactly
+  All other targets - exact multiset rule: the candidate's modality AND full target set must exactly
   match a BEONE_PIPELINE entry (same modality, same targets in any order, same count).
   Partial overlap (one shared target out of several, or same targets but different modality) does NOT match.
 
@@ -617,47 +617,47 @@ MATCHING RULES:
     TCE / CD3 + CD19         â†' MATCH (exact)
     mAb / EGFR               â†' NO match (EGFR alone not in pipeline as mAb)
     ADC / HER2               â†' MATCH (HER2 contains rule)
-    TCE / CD3 + PD-L1        â†' NO match (exact rule â€” not in pipeline)
+    TCE / CD3 + PD-L1        â†' NO match (exact rule - not in pipeline)
 
 OUTCOMES per asset:
-  â€” Match â†' set layer3: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }
+ - Match â†' set layer3: { status: "fail", reason: "Competitive overlap: matches BeOne [name] ([modality]/[targets])" }
     set overallStatus: "excluded". Do NOT run Steps 4+5 for this asset.
-  â€” No match â†' asset continues to Step 4
-  â€” Platform-level record (no target) â†' Step 3 not applicable, asset continues to Step 4
+ - No match â†' asset continues to Step 4
+ - Platform-level record (no target) â†' Step 3 not applicable, asset continues to Step 4
 
 If ALL qualifying assets are eliminated here â†' excludedAt="step3", status="excluded"
 If â‰¥1 asset passes â†' proceed to Step 4 with passing assets only
 
-â•â•â• STEPS 4 + 5 â€” Licensing & Manufacturing Check (OneBD Cortellis deals) â•â•â•
+â•â•â• STEPS 4 + 5 - Licensing & Manufacturing Check (OneBD Cortellis deals) â•â•â•
 
 MANDATORY CALL SEQUENCE:
 1. onebd_resolve_company(companyName) â†' company_id
-   â€” If not found: no Cortellis history. All passing assets pass both Steps 4 and 5. Output deals:[] and go straight to JSON.
+  - If not found: no Cortellis history. All passing assets pass both Steps 4 and 5. Output deals:[] and go straight to JSON.
 2. â˜… YOU MUST call onebd_get_deals(company_id) immediately after resolve returns found:true.
    â˜… NEVER produce JSON output before calling onebd_get_deals. This call is not optional.
-   â€” Returns all company-level Cortellis deals with title, date, summary, assets[], territories[], values[], parties[].
+  - Returns all company-level Cortellis deals with title, date, summary, assets[], territories[], values[], parties[].
 
-DEALS ARRAY â€” populate deals[] in the JSON output with EVERY deal related to cancer biologics:
+DEALS ARRAY - populate deals[] in the JSON output with EVERY deal related to cancer biologics:
   Include: licensing deals, manufacturing/CDMO agreements, collaborations, options, co-development, acquisitions
     that involve oncology assets or biologic programs.
   Exclude: purely financial deals (debt, equity raises with no asset component), non-oncology deals,
     non-biologic small molecule deals.
   Set scope to:
-    "specific-asset"  â€” deal names one or more individual assets/compounds by name â†' set assetNames[]
-    "modality-group"  â€” deal covers a program type (e.g. "bsAb program", "ADC franchise") â†' set modalityGroup
-    "all"             â€” deal covers entire pipeline or all biologics
-    "company-level"   â€” collaboration, equity, platform deal with no specific asset or modality scope
+    "specific-asset" - deal names one or more individual assets/compounds by name â†' set assetNames[]
+    "modality-group" - deal covers a program type (e.g. "bsAb program", "ADC franchise") â†' set modalityGroup
+    "all"            - deal covers entire pipeline or all biologics
+    "company-level"  - collaboration, equity, platform deal with no specific asset or modality scope
   ALL cancer biologic deals go into deals[] regardless of whether they cause asset exclusion.
 
-ASSET MATCHING â€” only needed for deals that scope to a specific asset or modality group:
+ASSET MATCHING - only needed for deals that scope to a specific asset or modality group:
 
-  Step A â€” for deals where scope = "modality-group" OR deal.assets[] is EMPTY:
+  Step A - for deals where scope = "modality-group" OR deal.assets[] is EMPTY:
   Check the title and summary for a modality or program-category description using the keyword
   mapping below. Apply the deal to ALL qualifying assets of the matching modality type.
   No tool call needed. For Step 5 manufacturing deals: set layer5: fail for every asset of that
   modality type (e.g. "bsAb mfg partner" â†' layer5: fail on ALL bsAb assets in the pipeline).
 
-  Step B â€” for deals where scope = "specific-asset" and deal.assets[] lists named compounds:
+  Step B - for deals where scope = "specific-asset" and deal.assets[] lists named compounds:
   Match using the asset's drugId, primary name, AND altNames (synonym list from Citeline).
   For each name in deal.assets[]:
     1. Check against asset.name and every entry in asset.altNames (brand names, INNs, research codes).
@@ -667,7 +667,7 @@ ASSET MATCHING â€” only needed for deals that scope to a specific asset or 
        onebd_resolve_asset(assetPrimaryName) to confirm by ID.
     3. If IDs match â†' confirmed same molecule â†' apply deal.
     4. If IDs differ â†' different assets â†' deal does NOT apply.
-  Prefer altName matching over tool calls â€” it covers most cases and saves iterations.
+  Prefer altName matching over tool calls - it covers most cases and saves iterations.
 
   Keyword â†' scope mapping:
 
@@ -678,7 +678,7 @@ ASSET MATCHING â€” only needed for deals that scope to a specific asset or 
     â†' Does NOT apply to: standard bispecific IgG formats (CrossMab, DuoBody, BiTE, DART,
       knobs-into-holes IgG) that are not fusion proteins.
     â†' WHEN IN DOUBT about whether a bsAb/tsAb uses a fusion format: APPLY the deal to it.
-      Err toward including more assets in the deal scope rather than excluding them â€” the user
+      Err toward including more assets in the deal scope rather than excluding them - the user
       can review; a missed disqualifying deal is worse than a false flag.
 
   "bispecific program(s)" / "bispecific antibody program(s)" (without "fusion"):
@@ -690,9 +690,9 @@ ASSET MATCHING â€” only needed for deals that scope to a specific asset or 
   "bi- and trispecific" / "bi- and multi-specific" (without "fusion"):
     â†' Applies to all bsAb and tsAb assets, NOT to pure Fc-fusion assets.
 
-  CRITICAL PARSING RULE â€” "bispecific ADCs" / "trispecific ADCs" / "bi- and trispecific ADCs" /
+  CRITICAL PARSING RULE - "bispecific ADCs" / "trispecific ADCs" / "bi- and trispecific ADCs" /
   "bispecific and trispecific ADCs" / "[format] ADCs":
-    â†' The format qualifier (bi-, tri-, multispecific) MODIFIES ADC â€” it means ADCs of that format.
+    â†' The format qualifier (bi-, tri-, multispecific) MODIFIES ADC - it means ADCs of that format.
     â†' Applies ONLY to ADC assets that are bispecific or trispecific. Does NOT apply to plain bsAbs
        or tsAbs that carry no ADC payload.
     â†' Example: "bsAb and trispecific ADCs" = bispecific ADCs + trispecific ADCs. A plain bsAb
@@ -716,31 +716,31 @@ ASSET MATCHING â€” only needed for deals that scope to a specific asset or 
 
 ASSESS STEPS 4 AND 5 SIMULTANEOUSLY for each qualifying asset using the same deal batch:
 
-Step 4 â€” Licensing/Rights (per asset still passing after Step 3):
+Step 4 - Licensing/Rights (per asset still passing after Step 3):
   Use ONLY these explicit rights-transfer keywords: out-licens, exclusive license, grant license,
   license rights, sublicens, royalt, assign rights, transfer rights, commercialization rights.
-  Also check the deal's transaction_type and agreement_type fields directly â€” these are structured
+  Also check the deal's transaction_type and agreement_type fields directly - these are structured
   Cortellis fields and are more reliable than keyword matching on title/summary.
-  Do NOT trigger on: collaboration, partnership, co-develop, co-promotion â€” these typically mean both
+  Do NOT trigger on: collaboration, partnership, co-develop, co-promotion - these typically mean both
   parties retain rights and are not exclusion events.
 
-  â€” transaction_type contains "Option" OR "License Option" OR agreement_type contains "Option" â†'
+ - transaction_type contains "Option" OR "License Option" OR agreement_type contains "Option" â†'
     layer3: fail, excluded regardless of territory.
-    Note in asset notes: "License option granted â€” asset encumbered. Partner: [name], Date: [date]"
-  â€” Deal with explicit rights-transfer language, territory = Global or US â†' layer3: fail, excluded (note partner + date)
-  â€” Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) â†' layer3: pass
-  â€” Deal with explicit rights-transfer language, territory unspecified or empty â†' layer3: fail, excluded
-    Note in asset notes: "Out-licensed â€” no territory disclosed, assumed global. Partner: [name], Date: [date]"
-  â€” Collaboration / co-development with no rights-transfer language â†' layer3: pass (note deal in researchNotes)
-  â€” No matching rights-transfer deal â†' layer3: pass
+    Note in asset notes: "License option granted - asset encumbered. Partner: [name], Date: [date]"
+ - Deal with explicit rights-transfer language, territory = Global or US â†' layer3: fail, excluded (note partner + date)
+ - Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) â†' layer3: pass
+ - Deal with explicit rights-transfer language, territory unspecified or empty â†' layer3: fail, excluded
+    Note in asset notes: "Out-licensed - no territory disclosed, assumed global. Partner: [name], Date: [date]"
+ - Collaboration / co-development with no rights-transfer language â†' layer3: pass (note deal in researchNotes)
+ - No matching rights-transfer deal â†' layer3: pass
 
-Step 5 â€” US Manufacturing (per asset still passing Step 4):
+Step 5 - US Manufacturing (per asset still passing Step 4):
   Keywords: manufactur, cdmo, cmo, contract manufactur, supply agreement, tech transfer, bioreactor,
             lonza, wuxi biolog, samsung biolog, thermo fisher, catalent, fujifilm, agc biolog, rentschler, patheon
 
   When territories[] is empty, infer US presence from the CDMO entity name in companies[]:
     Look at the name of the manufacturing party (the CDMO / non-screened-company party).
-    Entity names carry geographic identifiers â€” read them literally:
+    Entity names carry geographic identifiers - read them literally:
 
     Entity name implies a SPECIFIC NON-US location â†' no US capacity from this entity â†' layer4: PASS:
       "(Shanghai)", "(Suzhou)", "(Wuxi)", "(Beijing)", any "(China)" city, "Co Ltd" Chinese suffix,
@@ -759,48 +759,48 @@ Step 5 â€” US Manufacturing (per asset still passing Step 4):
     Truly ambiguous (cannot tell from entity name) â†' layer4: PASS + add "check-mfg-partner" to flags[]
 
   Per asset:
-  â€” Manufacturing deal, territory explicitly includes Global or US â†' layer4: fail, excluded (note CDMO entity + date)
-  â€” Manufacturing deal, territory explicitly non-US (China, Asia, Europe) â†' layer4: pass
-  â€” Manufacturing deal, territory unspecified, CDMO entity = specific non-US location â†' layer4: pass
-  â€” Manufacturing deal, territory unspecified, CDMO entity = global or US-capable â†' layer4: fail, excluded (note CDMO entity + date)
-  â€” Manufacturing deal, territory unspecified, CDMO entity truly ambiguous â†' layer4: pass + add "check-mfg-partner" to flags[]
-  â€” No matching manufacturing deal â†' layer4: pass (manufacturing gap confirmed)
+ - Manufacturing deal, territory explicitly includes Global or US â†' layer4: fail, excluded (note CDMO entity + date)
+ - Manufacturing deal, territory explicitly non-US (China, Asia, Europe) â†' layer4: pass
+ - Manufacturing deal, territory unspecified, CDMO entity = specific non-US location â†' layer4: pass
+ - Manufacturing deal, territory unspecified, CDMO entity = global or US-capable â†' layer4: fail, excluded (note CDMO entity + date)
+ - Manufacturing deal, territory unspecified, CDMO entity truly ambiguous â†' layer4: pass + add "check-mfg-partner" to flags[]
+ - No matching manufacturing deal â†' layer4: pass (manufacturing gap confirmed)
   Always note the CDMO entity name, deal date, and outcome in the asset's notes field.
 
-DEAL NOTES â€” MANDATORY for every asset that reaches Steps 4+5:
+DEAL NOTES - MANDATORY for every asset that reaches Steps 4+5:
   Populate each asset's "notes" field referencing any deals[] entries that apply to that asset
   (matched via specific-asset ID confirmation OR modality-group keyword OR scope=all).
   Format each matched deal as one line:
     "[date] [title] | [licensing/manufacturing/collaboration] | Territory: [territory or 'unspecified'] | [outcome reason]"
   Examples:
-    "2025-07-01 Henlius to develop and commercialize HCB-101 | licensing | Territory: ex-US (China, SE Asia, MENA) | US rights retained â€” pass"
-    "2026-01-26 WuXi Biologics (Shanghai) â€” end-to-end manufacturing for fusion programs | manufacturing | Territory: unspecified (WuXi = global CDMO with US capacity) | screened out"
+    "2025-07-01 Henlius to develop and commercialize HCB-101 | licensing | Territory: ex-US (China, SE Asia, MENA) | US rights retained - pass"
+    "2026-01-26 WuXi Biologics (Shanghai) - end-to-end manufacturing for fusion programs | manufacturing | Territory: unspecified (WuXi = global CDMO with US capacity) | screened out"
     "2024-03-15 Lonza biologics supply agreement | manufacturing | Territory: unspecified (Lonza = global CDMO with US capacity) | screened out"
   If no deals[] entries match this asset, write "No Cortellis deals matched to this asset".
   Do NOT leave notes blank for any asset that went through Steps 4+5.
 
 If ALL remaining assets excluded at Step 4 â†' excludedAt="step4"
 If ALL remaining assets excluded at Step 5 â†' excludedAt="step5"
-Never return inconclusive due to Step 5 alone â€” if any asset still passes, company qualifies.
+Never return inconclusive due to Step 5 alone - if any asset still passes, company qualifies.
 
-SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 â€” licensing and manufacturing deals".
+SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 - licensing and manufacturing deals".
 
 â•â•â• RULES â•â•â•
 
-  â˜… GOLDEN RULE â€” ASSET-LEVEL PASS: If even ONE asset passes all steps, the company is
+  â˜… GOLDEN RULE - ASSET-LEVEL PASS: If even ONE asset passes all steps, the company is
     status="qualifying". A company is only excluded if ALL qualifying assets are eliminated.
     Example: 14 assets screened out + 1 asset passes Step 5 â†' company QUALIFIES on that asset.
     Never set status="excluded" while any single asset still has overallStatus="qualifying".
 
-  â€” Run Step 3 (competitive overlap) BEFORE calling OneBD â€” it's free and eliminates assets early
-  â€” onebd_resolve_company: call ONCE per company
-  â€” onebd_get_deals: MANDATORY immediately after resolve returns found:true â€” call ONCE, never skip
-  â€” Steps 4 and 5 both use the SAME deal batch from onebd_get_deals â€” no additional OneBD calls
-  â€” Match deals to Citeline assets by name (fuzzy) â€” no asset-level OneBD resolution needed
-  â€” Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
-  â€” Use NCI-standard target names: PD-1 (not PD1), HER2 (not ERBB2), EGFR, CD3, CD19, etc.
-  â€” Return ONLY valid JSON at end â€” no text before or after it
-  â€” Every turn must end with either a tool call or the final JSON â€” never neither
+ - Run Step 3 (competitive overlap) BEFORE calling OneBD - it's free and eliminates assets early
+ - onebd_resolve_company: call ONCE per company
+ - onebd_get_deals: MANDATORY immediately after resolve returns found:true - call ONCE, never skip
+ - Steps 4 and 5 both use the SAME deal batch from onebd_get_deals - no additional OneBD calls
+ - Match deals to Citeline assets by name (fuzzy) - no asset-level OneBD resolution needed
+ - Normalize modality to exactly: mAb | bsAb | tsAb | ADC | TCE | NKCE | Fc-fusion | Immunocytokine
+ - Use NCI-standard target names: PD-1 (not PD1), HER2 (not ERBB2), EGFR, CD3, CD19, etc.
+ - Return ONLY valid JSON at end - no text before or after it
+ - Every turn must end with either a tool call or the final JSON - never neither
 
 â•â•â• REQUIRED JSON OUTPUT â•â•â•
 
@@ -857,30 +857,30 @@ SOURCING: Add "onebd:cortellis-deals" to sources[] with usedFor "Steps 4+5 â€
     {
       "url": "citeline:sql",
       "label": "Citeline database",
-      "usedFor": "Steps 1+2 â€” oncology biologic identification",
+      "usedFor": "Steps 1+2 - oncology biologic identification",
       "type": "citeline"
     }
   ]
 }
 
 Notes on the asset schema:
-  layer3 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer3.status = "inconclusive", reason = "No target â€” not applicable".
+  layer3 = Step 3 competitive overlap. Fill for all assets (pass or fail). For platform-level records with no target, set layer3.status = "inconclusive", reason = "No target - not applicable".
   layer4 = Step 4 rights check. Only fill for assets that passed Step 3 (not competed out). For assets eliminated at Step 3, leave layer4/layer5 as null or omit.
   layer5 = Step 5 manufacturing check. Only fill for assets that passed Steps 3+4.
   For Citeline track, use "citeline:sql" as url placeholder in sources[].
   For OneBD calls in sources[], use "onebd:cortellis-deals" as url placeholder.
 `.trim();
 
-// Derived from BASE_STEPS_345_PROMPT â€” identical Steps 3+4+5 logic, header replaced.
+// Derived from BASE_STEPS_345_PROMPT - identical Steps 3+4+5 logic, header replaced.
 // Steps 1+2 data is pre-loaded from Citeline SQL and passed in the user message.
 const CITELINE_PRIMARY_PROMPT = (() => {
-  const step3Marker = 'â•â•â• STEP 3 â€” COMPETITIVE OVERLAP';
+  const step3Marker = 'â•â•â• STEP 3 - COMPETITIVE OVERLAP';
   const idx = BASE_STEPS_345_PROMPT.indexOf(step3Marker);
   const body = idx !== -1 ? BASE_STEPS_345_PROMPT.slice(idx) : BASE_STEPS_345_PROMPT;
   return (
     `You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
-CONTEXT: PRIMARY TRACK â€” Citeline database (Steps 1+2 pre-loaded) + OneBD Cortellis deals (Steps 4+5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologic identification) are DONE â€” the qualifying assets are already in the user message.
+CONTEXT: PRIMARY TRACK - Citeline database (Steps 1+2 pre-loaded) + OneBD Cortellis deals (Steps 4+5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologic identification) are DONE - the qualifying assets are already in the user message.
 
 OBJECTIVE: Use the Citeline asset list provided. Do NOT call any pipeline lookup tool. Start immediately at STEP 3 (competitive overlap), then STEPS 4+5 via onebd_resolve_company and onebd_get_deals.
 
@@ -894,33 +894,33 @@ ${body}`
     .trim();
 })();
 
-// Website input track prompt â€” Steps 1+2 from user-supplied URL, Steps 3+4+5 via OneBD.
+// Website input track prompt - Steps 1+2 from user-supplied URL, Steps 3+4+5 via OneBD.
 // No web_search available. Derived from the same Steps 3+4+5 body as the other prompts.
 const WEBSITE_INPUT_SYSTEM_PROMPT = (() => {
-  const step3Marker = 'â•â•â• STEP 3 â€” COMPETITIVE OVERLAP';
+  const step3Marker = 'â•â•â• STEP 3 - COMPETITIVE OVERLAP';
   const idx = BASE_STEPS_345_PROMPT.indexOf(step3Marker);
   const body = idx !== -1 ? BASE_STEPS_345_PROMPT.slice(idx) : BASE_STEPS_345_PROMPT;
   return (
     `You are a pharmaceutical business development analyst screening companies for BeOne Medicines' Hopewell, NJ biologics manufacturing partnership program.
 
-CONTEXT: WEBSITE INPUT TRACK â€” The company was not found in the Citeline database. The user has provided a pipeline page URL or company website URL. You have two tools only: fetch_webpage (to read the URL) and OneBD tools (for Steps 4+5 deals). You have NO web_search tool â€” do not attempt to search the web.
+CONTEXT: WEBSITE INPUT TRACK - The company was not found in the Citeline database. The user has provided a pipeline page URL or company website URL. You have two tools only: fetch_webpage (to read the URL) and OneBD tools (for Steps 4+5 deals). You have NO web_search tool - do not attempt to search the web.
 
 OBJECTIVE: Fetch the provided URL to discover the company's pipeline (Steps 1+2), then run Steps 3 â†' 4+5 in order.
 
-STEPS 1+2 â€” PIPELINE DISCOVERY FROM URL:
+STEPS 1+2 - PIPELINE DISCOVERY FROM URL:
 1. Call fetch_webpage with the provided URL immediately.
 2. If the page appears to be a general homepage rather than a pipeline/science page:
-   â€” Look for a link to /pipeline, /science, /programs, /research, /therapeutic-areas, or /our-science on the SAME domain.
-   â€” Fetch that subpage instead. Maximum 2 fetch_webpage calls for Steps 1+2.
+  - Look for a link to /pipeline, /science, /programs, /research, /therapeutic-areas, or /our-science on the SAME domain.
+  - Fetch that subpage instead. Maximum 2 fetch_webpage calls for Steps 1+2.
 3. Extract ALL individually named drug candidates at any development phase (Discovery through Approved).
-   â€” Do NOT filter by phase. Include all named assets.
-   â€” Exclude assets explicitly marked as ceased, discontinued, terminated, or withdrawn.
+  - Do NOT filter by phase. Include all named assets.
+  - Exclude assets explicitly marked as ceased, discontinued, terminated, or withdrawn.
 4. For each asset, identify:
    (a) Is it an oncology biologic? Qualifying modalities (CHO-expressed): mAb, bsAb, tsAb, ADC, TCE, NKCE, Fc-fusion, Immunocytokine.
    (b) Does the screened company manufacture the biologic drug substance (cell line/protein expression)?
        Exclude: AI/computational support only, payload/warhead-only suppliers, fill & finish only, CRO/regulatory consultant only.
 5. If the URL is unreadable, returns empty content, or contains no pipeline information, return immediately:
-   status="inconclusive", inconclusiveReason="Website Input Needed â€” provided URL was not readable or contained no pipeline data"
+   status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 ${body}`
   )
@@ -936,7 +936,7 @@ ${body}`
 // Tool implementations
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// 10-Ks/20-Fs are huge â€” jump straight to the requested section instead of
+// 10-Ks/20-Fs are huge - jump straight to the requested section instead of
 // truncating from the top. Heading wording varies slightly across filers, so
 // these are deliberately loose matches.
 const SEC_SECTION_PATTERNS = {
@@ -949,7 +949,7 @@ async function fetchWebpage(url, section) {
   try {
     const isSec = url.includes('sec.gov');
     const res = await axios.get(url, {
-      // Raised from 8000 â€” under SCREEN_CONCURRENCY=4, several companies' fetches
+      // Raised from 8000 - under SCREEN_CONCURRENCY=4, several companies' fetches
       // compete for network/CPU at once, so a fetch that'd succeed in 3-4s in
       // isolation can cross an 8s ceiling under contention and get misread as a
       // genuinely broken site, triggering the external-sourcing fallback for no
@@ -973,7 +973,7 @@ async function fetchWebpage(url, section) {
     const text = $('body').text().replace(/\s+/g, ' ').trim();
 
     if (text.length <= 100) {
-      return 'Page content appears empty (likely JavaScript-rendered â€” try fetching a different URL or searching for cached/text version).';
+      return 'Page content appears empty (likely JavaScript-rendered - try fetching a different URL or searching for cached/text version).';
     }
 
     if (isSec) {
@@ -981,11 +981,11 @@ async function fetchWebpage(url, section) {
       const match = text.match(requested);
       if (match) return text.slice(match.index, match.index + 8000);
 
-      // Requested section heading not found (wording varies by filer) â€” fall
+      // Requested section heading not found (wording varies by filer) - fall
       // back to Item 1 rather than returning nothing.
       if (section && section !== 'item1') {
         const fallback = text.match(SEC_SECTION_PATTERNS.item1);
-        const note = `Could not find an "${section}" section heading in this filing â€” returning Item 1 Business instead.\n\n`;
+        const note = `Could not find an "${section}" section heading in this filing - returning Item 1 Business instead.\n\n`;
         return fallback ? note + text.slice(fallback.index, fallback.index + 8000) : note + text.slice(0, 8000);
       }
     }
@@ -997,7 +997,7 @@ async function fetchWebpage(url, section) {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Pipeline page discovery â€” used for thin-coverage enrichment.
+// Pipeline page discovery - used for thin-coverage enrichment.
 // Fetches the homepage, scores same-domain links by pipeline keywords,
 // then fetches the best-matching subpage. Returns { url, content } or null.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1016,7 +1016,7 @@ const PIPELINE_LINK_SCORES = [
 
 async function findAndFetchPipelinePage(websiteUrl) {
   try {
-    // Homepage fetch â€” 6s budget leaves room for subpage fetch within 15s total
+    // Homepage fetch - 6s budget leaves room for subpage fetch within 15s total
     const res = await axios.get(websiteUrl, {
       timeout: 6000, maxRedirects: 4,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', Accept: 'text/html,*/*' },
@@ -1050,7 +1050,7 @@ async function findAndFetchPipelinePage(websiteUrl) {
     ranked.sort((a, b) => b.score - a.score);
     if (!ranked.length) return null;
 
-    // Subpage fetch â€” 8s budget (6 + 8 = 14s max, comfortably under 15s wall)
+    // Subpage fetch - 8s budget (6 + 8 = 14s max, comfortably under 15s wall)
     const best = ranked[0].url;
     const res2 = await axios.get(best, {
       timeout: 8000, maxRedirects: 4,
@@ -1068,7 +1068,7 @@ async function findAndFetchPipelinePage(websiteUrl) {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Evidence snapshot â€” captures what was actually read for audit trail
+// Evidence snapshot - captures what was actually read for audit trail
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeEvidenceSnapshot(url, content, type = 'fetch') {
@@ -1119,7 +1119,7 @@ async function callOneBdApi(path, method = 'GET', body = null) {
   }
 }
 
-// Thin wrappers â€” each returns the parsed JSON response object.
+// Thin wrappers - each returns the parsed JSON response object.
 
 function oneBdCounts() {
   return callOneBdApi('/counts');
@@ -1170,7 +1170,7 @@ function oneBdAssetDossier(assetId) {
 
 // Tool-callable wrappers for Steps 4+5 (OneBD Cortellis)
 
-// Suffixes that carry no identity signal â€” strip these to get the core name
+// Suffixes that carry no identity signal - strip these to get the core name
 const COMPANY_SUFFIX_RE = /\b(bio|biologics|biolog|biotherapeutics|biosciences|biopharma|therapeutics|pharma|pharmaceuticals|medicines|oncology|sciences|inc\.?|ltd\.?|llc\.?|corp\.?|co\.?|gmbh|ag|sa|plc|holdings|group)\b\.?$/gi;
 
 function companyNameVariants(name) {
@@ -1276,7 +1276,7 @@ function formatDealsForTool(deals) {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Citeline SQL â€” Azure Synapse connection + Steps 1+2 query
+// Citeline SQL - Azure Synapse connection + Steps 1+2 query
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 let _citelinePool = null;
@@ -1448,7 +1448,7 @@ const QUALIFYING_BIOLOGIC_MODALITIES = new Set([
 ]);
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Citeline spreadsheet loader â€” file-based primary when SQL auth
+// Citeline spreadsheet loader - file-based primary when SQL auth
 // is unavailable (BeiGene Conditional Access policy blocks direct
 // connection from unmanaged devices). Falls back to SQL if no file.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1470,7 +1470,7 @@ function stemCompany(name) {
 // Guards against false Citeline matches where the stem matches but the companies
 // are clearly different entities (e.g. "Checkmate Therapeutics" â‰  "Checkmate
 // Pharmaceuticals"). Strips only truly-generic legal suffixes (Inc, LLC, Ltd, Corp)
-// â€” not company-type descriptors â€” then checks for containment. If the names
+// - not company-type descriptors - then checks for containment. If the names
 // diverge beyond legal suffix variation, the match is rejected.
 function closeNameMatch(searchName, citeName) {
   const LEGAL_SUFFIX = /\s*(,\s*)?(inc\.?|ltd\.?|llc\.?|co\.?|corp\.?|corporation|limited|plc|sa\.?|nv|gmbh|ag|bv)\s*$/gi;
@@ -1500,7 +1500,7 @@ function loadCitelineSpreadsheet() {
   ];
   const filePath = candidates.find(p => fs.existsSync(p));
   if (!filePath) {
-    console.log('[citeline] No spreadsheet found â€” will attempt SQL connection');
+    console.log('[citeline] No spreadsheet found - will attempt SQL connection');
     return;
   }
   console.log(`[citeline] Loading spreadsheet: ${path.basename(filePath)}`);
@@ -1549,14 +1549,14 @@ function citelineGetAssetsLocal(companyName) {
   // clearly a different entity (e.g. "Checkmate Pharmaceuticals" â‰  "Checkmate
   // Therapeutics"). Only accept if the Citeline name is a close match to the
   // searched name (exact after stripping generic legal suffixes, or one contains
-  // the other). Checked against the first row's companyName â€” all rows share it.
+  // the other). Checked against the first row's companyName - all rows share it.
   const citelineCompanyName = matchedRows[0].companyName || '';
   if (citelineCompanyName && !closeNameMatch(companyName, citelineCompanyName)) {
-    console.log(`    [${companyName}] [citeline] stem match found "${citelineCompanyName}" but names differ â€” routing to website input`);
+    console.log(`    [${companyName}] [citeline] stem match found "${citelineCompanyName}" but names differ - routing to website input`);
     return { rows: [], coverageStatus: 'inconclusive-not-found', companyWebsite: null, pipelineUrl: null };
   }
 
-  // Company-level URL fields â€” same across all rows for this company
+  // Company-level URL fields - same across all rows for this company
   const cleanUrl = v => (v && typeof v === 'string' && v.trim() && v.trim().toUpperCase() !== 'NULL') ? v.trim() : null;
   const companyWebsite = cleanUrl(matchedRows.find(r => r.companyWebsite)?.companyWebsite);
   const pipelineUrl    = cleanUrl(matchedRows.find(r => r.pipelineUrl)?.pipelineUrl);
@@ -1579,7 +1579,7 @@ function citelineGetAssetsLocal(companyName) {
     };
   }
 
-  // Deduplicate by drugId â€” keep best modality per drug using MODALITY_PRIORITY
+  // Deduplicate by drugId - keep best modality per drug using MODALITY_PRIORITY
   const byDrugId = {};
   for (const row of qualifying) {
     const id = String(row.drugId);
@@ -1632,7 +1632,7 @@ async function citelineGetAssets(companyName) {
     };
   }
 
-  // 0 qualifying assets â€” check what the company actually has in Citeline
+  // 0 qualifying assets - check what the company actually has in Citeline
   const checkResult = await pool.request()
     .input('company', sql.NVarChar(200), companyName)
     .query(CITELINE_MODALITY_CHECK_SQL);
@@ -1674,7 +1674,7 @@ async function loadCompanyTickers() {
   return tickerCache;
 }
 
-// Exact-match only â€” Claude supplies this after reading it directly off the
+// Exact-match only - Claude supplies this after reading it directly off the
 // company's website, so there's no fuzzy name-matching false-positive risk
 // (unlike resolving public/private from the spreadsheet name alone).
 async function findCikByTicker(ticker) {
@@ -1715,7 +1715,7 @@ async function getLatestFilingUrl(cik) {
 // Auto-flag: Indication Synergy + Phase Synergy via ClinicalTrials.gov,
 // Strategic Synergy via a small capped Claude research pass. Triggered
 // on-demand from the results view ("Flag High Priority Assets"), not
-// during initial screening â€” these need a registered trial (CT.gov) or
+// during initial screening - these need a registered trial (CT.gov) or
 // deeper science detail that isn't always resolved in the main pass.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1752,7 +1752,7 @@ async function lookupClinicalTrialsForAsset(companyName, assetName) {
   }
 }
 
-// Indication Synergy keyword list â€” hematology, lung, GI (colorectal/stomach/gallbladder/pancreas),
+// Indication Synergy keyword list - hematology, lung, GI (colorectal/stomach/gallbladder/pancreas),
 // women's cancers (breast/gyn). Prostate is explicitly NOT included.
 const INDICATION_SYNERGY_TERMS = [
   // Hematology
@@ -1764,7 +1764,7 @@ const INDICATION_SYNERGY_TERMS = [
   // Lung
   'SCLC', 'Small Cell Lung Cancer', 'small cell lung carcinoma', 'NSCLC',
   'Non-Small Cell Lung Cancer', 'lung adenocarcinoma', 'squamous cell lung carcinoma',
-  // GI â€” colorectal, stomach, gallbladder, pancreas, esophagus, biliary
+  // GI - colorectal, stomach, gallbladder, pancreas, esophagus, biliary
   'CRC', 'colorectal cancer', 'colorectal carcinoma', 'colon cancer', 'rectal cancer',
   'ESCC', 'Esophageal Squamous Cell Carcinoma', 'esophageal cancer', 'esophageal adenocarcinoma',
   'GC', 'Gastric Cancer', 'stomach cancer', 'stomach carcinoma',
@@ -1780,7 +1780,7 @@ const INDICATION_SYNERGY_TERMS = [
   'cervical cancer', 'cervical carcinoma', 'endometrial cancer', 'endometrial carcinoma', 'uterine cancer',
 ];
 
-// Prostate cancer is NOT a BeOne indication synergy focus â€” strip it before matching
+// Prostate cancer is NOT a BeOne indication synergy focus - strip it before matching
 // so MSI-H prostate or other broad terms don't accidentally trigger the flag.
 const PROSTATE_RE = /prostate(\s+cancer|\s+carcinoma|\s+adenocarcinoma|\s+tumor)?/gi;
 
@@ -1804,7 +1804,7 @@ function computePhaseSynergy(asset, ctgov) {
   return false;
 }
 
-// Targets that qualify for checkpoint-IO-alt flag â€” non-PD-1/PD-L1 checkpoint receptors only.
+// Targets that qualify for checkpoint-IO-alt flag - non-PD-1/PD-L1 checkpoint receptors only.
 // TCEs are excluded (they have their own masked-tce flag). PD-1/PD-L1 combos no longer qualify.
 const CHECKPOINT_ALT_TARGETS = ['lag-3', 'lag3', 'tim-3', 'tim3', 'tigit', 'ctla-4', 'ctla4', 'vista', 'btla', 'cd96', 'nkg2a', 'ox40', 'cd134', '4-1bb', 'cd137', 'icos', 'cd278', 'gitr', 'cd357'];
 
@@ -1822,7 +1822,7 @@ const OVERVIEW_COMMON_PAYLOAD_RE = /\b(DXd|deruxtecan|SN-38|exatecan|MMAE|monome
 const OVERVIEW_ADC_RE            = /\b(antibody[- ]drug\s+conjugate|ADC|conjugate)\b/i;
 
 // Compute flags directly from Steps 1+2 asset data (no web research needed).
-// Called automatically after every screening run â€” no manual autoflag step required
+// Called automatically after every screening run - no manual autoflag step required
 // for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
 // adc-novel-payload and TCE masking moiety still need manual autoflag (payload detail not in Citeline data).
 // Called automatically after every screening run — no manual autoflag step required
@@ -1907,7 +1907,7 @@ function applyAutoFlags(result) {
 
 // Strategic Synergy needs molecular detail (payload identity, masking moiety,
 // exact checkpoint target) that the main screening pass doesn't always capture.
-// Capped at 3 tool calls total â€” if nothing turns up, leave the flag unset
+// Capped at 3 tool calls total - if nothing turns up, leave the flag unset
 // rather than guessing (per the plan's Flagging Rule).
 const STRATEGIC_FLAG_TOOLS = [
   { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
@@ -1920,20 +1920,20 @@ async function researchStrategicSynergy(company, asset, client) {
     content: `Determine if this oncology biologic asset qualifies for a "Strategic Synergy" flag.
 
 Company: ${company.name}
-Asset: ${asset.name || '(unnamed)'} â€” modality: ${asset.modality || 'unknown'}, targets: ${(asset.targets || []).join(', ') || 'unknown'}
+Asset: ${asset.name || '(unnamed)'} - modality: ${asset.modality || 'unknown'}, targets: ${(asset.targets || []).join(', ') || 'unknown'}
 Known indication: ${asset.indication || 'unknown'}
 Existing research notes: ${asset.notes || company.researchNotes || '(none)'}
 Company website: ${company.website || '(unknown)'}
 
 Qualifies if ANY of:
 1. masked-tce-4-1bb: a TCE with EITHER a masking/prodrug moiety (TME-cleavable, probody, conditional activation) OR engaging 4-1BB (CD137) as one of its targets.
-2. adc-novel-payload: an ADC using a single payload OTHER than a TOP1 inhibitor (DXd/deruxtecan, SN-38, exatecan) or MMAE â€” e.g. DM1, DM4, PBD, calicheamicin, tubulysin, cryptophycin â€” OR a dual payload combination other than MMAE+TOP1.
+2. adc-novel-payload: an ADC using a single payload OTHER than a TOP1 inhibitor (DXd/deruxtecan, SN-38, exatecan) or MMAE - e.g. DM1, DM4, PBD, calicheamicin, tubulysin, cryptophycin - OR a dual payload combination other than MMAE+TOP1.
 3. checkpoint-io-alt: targets a non-PD-1/PD-L1 checkpoint receptor (LAG-3, TIM-3, TIGIT, CTLA-4, VISTA, BTLA, CD96, NKG2A, OX40, 4-1BB, ICOS, GITR) AND is NOT a TCE modality. TCEs belong to masked-tce-4-1bb. PD-1/PD-L1 combinations do NOT qualify for this flag.
 
 BUDGET: at most 3 tool calls total. Look at the asset's own science/pipeline page or the
-existing notes above first â€” only search if the specific molecular detail (payload identity,
+existing notes above first - only search if the specific molecular detail (payload identity,
 masking moiety, exact checkpoint target) genuinely isn't there yet. If you still can't find
-clear evidence after 3 calls, do NOT guess â€” return "none".
+clear evidence after 3 calls, do NOT guess - return "none".
 
 Return ONLY this JSON, nothing else:
 {"flag": "masked-tce-4-1bb" | "adc-novel-payload" | "checkpoint-io-alt" | "none", "reason": ""}`
@@ -1993,13 +1993,13 @@ Return ONLY this JSON, nothing else:
       return null;
     }
   }
-  return null; // exhausted the budget without a clear answer â€” don't guess
+  return null; // exhausted the budget without a clear answer - don't guess
 }
 
 
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Citeline primary track â€” SQL Steps 1+2, then Claude for Steps 3+4+5
+// Citeline primary track - SQL Steps 1+2, then Claude for Steps 3+4+5
 // Returns a full result object, or null if no qualifying assets found (fall through).
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -2192,7 +2192,7 @@ async function screenWithCitelinePrimary(companyName, client) {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Step 0 â€” Big Pharma pre-filter (static list, instant, no research)
+// Step 0 - Big Pharma pre-filter (static list, instant, no research)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const BIG_PHARMA = [
@@ -2234,11 +2234,11 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   companyName = sanitizeCompanyName(companyName) || companyName;
   const { skipCiteline = false } = opts;
 
-  // Step 0 first â€” instant, no research needed, per the plan. Skips the Claude
+  // Step 0 first - instant, no research needed, per the plan. Skips the Claude
   // call entirely for an obvious Big Pharma match.
   const bigPharmaMatch = matchesBigPharma(companyName);
   if (bigPharmaMatch) {
-    console.log(`    [${companyName}] [pre-filter] EXCLUDED â€” matches Big Pharma list: ${bigPharmaMatch}`);
+    console.log(`    [${companyName}] [pre-filter] EXCLUDED - matches Big Pharma list: ${bigPharmaMatch}`);
     return {
       name: companyName,
       id: slugify(companyName),
@@ -2263,16 +2263,16 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
     try {
       citelineResult = await screenWithCitelinePrimary(companyName, client);
     } catch (e) {
-      console.log(`    [${companyName}] [citeline] [error] ${e.message} â€” returning inconclusive for website input`);
+      console.log(`    [${companyName}] [citeline] [error] ${e.message} - returning inconclusive for website input`);
     }
     if (citelineResult) {
       applyAutoFlags(citelineResult);
       logScreeningBreakdown(citelineResult);
-      console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' â€” excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' â€” ' + citelineResult.inconclusiveReason : ''}`);
+      console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' - excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' - ' + citelineResult.inconclusiveReason : ''}`);
       return citelineResult;
     }
-    // Not found or error â€” return inconclusive immediately for website input
-    console.log(`    [${companyName}] [citelineâ†'website-input] Not found in Citeline â€” routing to website input`);
+    // Not found or error - return inconclusive immediately for website input
+    console.log(`    [${companyName}] [citelineâ†'website-input] Not found in Citeline - routing to website input`);
     return {
       id: slugify(companyName),
       name: companyName.replace(/BeiGene/gi, 'BeOne'),
@@ -2283,7 +2283,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       excludedAt: null,
       excludedReason: '',
       excludedSource: '',
-      inconclusiveReason: 'Not found in Citeline database â€” website input needed',
+      inconclusiveReason: 'Not found in Citeline database - website input needed',
       assets: [],
       deals: [],
       beoneAnalyzed: false,
@@ -2300,7 +2300,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   // â”€â”€ WEBSITE INPUT TRACK: user-provided URL, no web search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Only reached when skipCiteline=true (re-screening an inconclusive with a URL).
   if (!websiteUrl) {
-    // No URL provided â€” stay inconclusive
+    // No URL provided - stay inconclusive
     return {
       id: slugify(companyName),
       name: companyName.replace(/BeiGene/gi, 'BeOne'),
@@ -2311,7 +2311,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       excludedAt: null,
       excludedReason: '',
       excludedSource: '',
-      inconclusiveReason: 'Not found in Citeline database â€” website input needed',
+      inconclusiveReason: 'Not found in Citeline database - website input needed',
       assets: [],
       deals: [],
       beoneAnalyzed: false,
@@ -2331,25 +2331,25 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       role: 'user',
       content: `Screen this company for a BeOne Medicines manufacturing partnership: "${companyName}"
 
-WEBSITE INPUT TRACK â€” URL PROVIDED: ${websiteUrl}
+WEBSITE INPUT TRACK - URL PROVIDED: ${websiteUrl}
 
 STEP 1: Call fetch_webpage("${websiteUrl}") immediately to load the pipeline page.
-  â€” If the page is a general company homepage (not showing specific drug candidates), look for a /pipeline, /science, /programs, /research, or /therapeutic-areas link on the SAME domain and fetch that subpage instead.
-  â€” Maximum 2 fetch_webpage calls for pipeline discovery.
-  â€” Extract ALL individually named drug candidates at any development phase (Discovery through Approved).
-  â€” Exclude assets explicitly marked as ceased, discontinued, terminated, or withdrawn.
+ - If the page is a general company homepage (not showing specific drug candidates), look for a /pipeline, /science, /programs, /research, or /therapeutic-areas link on the SAME domain and fetch that subpage instead.
+ - Maximum 2 fetch_webpage calls for pipeline discovery.
+ - Extract ALL individually named drug candidates at any development phase (Discovery through Approved).
+ - Exclude assets explicitly marked as ceased, discontinued, terminated, or withdrawn.
 
 STEP 2: For each extracted asset, check:
   (a) Is it an oncology biologic? Qualifying: mAb, bsAb, tsAb, ADC, TCE, NKCE, Fc-fusion, Immunocytokine
   (b) Does the company manufacture the biologic drug substance? Exclude AI-only, payload-only, fill & finish only.
 
 If the URL is unreadable or contains no pipeline data, return immediately:
-  status="inconclusive", inconclusiveReason="Website Input Needed â€” provided URL was not readable or contained no pipeline data"
+  status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 Then proceed directly to Steps 3, 4, 5 (competitive overlap then OneBD deals).
 
 BUDGET: 6 tool calls max (up to 2 URL fetches + resolve_company + get_deals + up to 2 asset resolves).
-Never end a turn with only a plan â€” make the tool call or return the JSON in the same turn.`
+Never end a turn with only a plan - make the tool call or return the JSON in the same turn.`
     }
   ];
 
@@ -2432,7 +2432,7 @@ Never end a turn with only a plan â€” make the tool call or return the JSON
       if (!Array.isArray(result.deals)) result.deals = [];
 
       // Claude's own judgment call on whether the website itself was ever usable
-      // drives externalSourcing â€” a search happening at all (e.g. step 0a finding
+      // drives externalSourcing - a search happening at all (e.g. step 0a finding
       // the site URL) shouldn't trip this on its own. But once externalSourcing
       // is true, fill out the citation list from what was actually collected
       // server-side, so it's complete even if Claude's own write-up missed some.
@@ -2443,7 +2443,7 @@ Never end a turn with only a plan â€” make the tool call or return the JSON
           for (const s of result.externalSources) if (s && s.url) sourceMap.set(s.url, s);
         }
         result.externalSources = Array.from(sourceMap.values());
-        // purple-flag removed â€” externalSourcing is tracked but not surfaced as a flag
+        // purple-flag removed - externalSourcing is tracked but not surfaced as a flag
       } else {
         result.externalSourcing = false;
         result.externalSources = [];
@@ -2457,13 +2457,13 @@ Never end a turn with only a plan â€” make the tool call or return the JSON
       return result;
     }
 
-    // web_search is server-side now â€” Anthropic resolves it automatically and
+    // web_search is server-side now - Anthropic resolves it automatically and
     // includes results directly in response.content. If its internal search
     // loop hits its own iteration cap, the API returns pause_turn; just
     // re-send (assistant content already pushed above) to let it continue.
     // This previously logged nothing, making a long pause_turn chain (e.g.
     // open-ended name-variant searching) invisible until the iteration
-    // budget silently ran out â€” log every occurrence now.
+    // budget silently ran out - log every occurrence now.
     if (response.stop_reason === 'pause_turn') {
       console.log(`    [${companyName}] [pause_turn] internal search loop continuing (iteration ${i + 1})`);
       continue;
@@ -2512,7 +2512,7 @@ Never end a turn with only a plan â€” make the tool call or return the JSON
     }
   }
 
-  // Exhausted the iteration budget without reaching end_turn+JSON â€” degrade
+  // Exhausted the iteration budget without reaching end_turn+JSON - degrade
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2525,14 +2525,14 @@ function logScreeningBreakdown(result) {
   console.log(`    ${tag} [track] ${track}`);
 
   if (result.excludedAt === 'pre-filter') {
-    console.log(`    ${tag} [pre-filter] EXCLUDED (Big Pharma) â€” ${result.excludedReason || ''}`);
+    console.log(`    ${tag} [pre-filter] EXCLUDED (Big Pharma) - ${result.excludedReason || ''}`);
     return;
   }
-  console.log(`    ${tag} [pre-filter] passed â€” biotech/biopharma`);
+  console.log(`    ${tag} [pre-filter] passed - biotech/biopharma`);
 
   if (result.externalSourcing) {
-    console.log(`    ${tag} [purple-flag] Not Sourced From Company Website â€” company website never loaded usable content`);
-    (result.externalSources || []).forEach(s => console.log(`      ${tag} [source] ${s.url}${s.title ? ' â€” ' + s.title : ''}`));
+    console.log(`    ${tag} [purple-flag] Not Sourced From Company Website - company website never loaded usable content`);
+    (result.externalSources || []).forEach(s => console.log(`      ${tag} [source] ${s.url}${s.title ? ' - ' + s.title : ''}`));
   }
 
   if (!result.assets || result.assets.length === 0) {
@@ -2544,12 +2544,12 @@ function logScreeningBreakdown(result) {
     console.log(`    ${tag} Asset ${i + 1}/${result.assets.length}: ${asset.name} (${asset.modality || '?'})`);
     for (const layer of ['layer1', 'layer2', 'layer3', 'layer4']) {
       const l = asset[layer];
-      if (l) console.log(`      ${tag} [${layer}] ${l.status}${l.reason ? ' â€” ' + l.reason : ''}`);
+      if (l) console.log(`      ${tag} [${layer}] ${l.status}${l.reason ? ' - ' + l.reason : ''}`);
     }
     console.log(`      ${tag} [overall] ${asset.overallStatus}`);
   });
 
-  // Layer 5 (direct competitor check) runs client-side in the browser â€”
+  // Layer 5 (direct competitor check) runs client-side in the browser - 
   // it just compares modality+targets against BEONE_PIPELINE, no research needed.
   if (result.researchNotes) console.log(`    ${tag} [notes] ${result.researchNotes}`);
 }
@@ -2571,15 +2571,15 @@ function buildScreenerLog(result) {
   }
 
   if (result.excludedAt === 'pre-filter') {
-    lines.push(`${tag} [pre-filter] EXCLUDED (Big Pharma) â€” ${result.excludedReason || ''}`);
+    lines.push(`${tag} [pre-filter] EXCLUDED (Big Pharma) - ${result.excludedReason || ''}`);
     return lines.join('\n');
   }
-  lines.push(`${tag} [pre-filter] passed â€” biotech/biopharma`);
+  lines.push(`${tag} [pre-filter] passed - biotech/biopharma`);
 
   if (result.externalSourcing) {
     lines.push(`${tag} [purple-flag] Not Sourced From Company Website`);
     (result.externalSources || []).forEach(s =>
-      lines.push(`  ${tag} [source] ${s.url}${s.title ? ' â€” ' + s.title : ''}`)
+      lines.push(`  ${tag} [source] ${s.url}${s.title ? ' - ' + s.title : ''}`)
     );
   }
 
@@ -2595,7 +2595,7 @@ function buildScreenerLog(result) {
     lines.push(`${tag} Asset ${i + 1}/${result.assets.length}: ${asset.name} (${asset.modality || '?'})`);
     for (const layer of ['layer1', 'layer2', 'layer3', 'layer4']) {
       const l = asset[layer];
-      if (l) lines.push(`  ${tag} [${layer}] ${l.status}${l.reason ? ' â€” ' + l.reason : ''}`);
+      if (l) lines.push(`  ${tag} [${layer}] ${l.status}${l.reason ? ' - ' + l.reason : ''}`);
     }
     lines.push(`  ${tag} [overall] ${asset.overallStatus}`);
   });
@@ -2681,7 +2681,7 @@ app.post('/api/screen', async (req, res) => {
     const result = await screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipCiteline });
     applyAutoFlags(result);
     logScreeningBreakdown(result);
-    console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' â€” ' + result.inconclusiveReason : ''}`);
+    console.log(`    [${company}] [FINAL] ${result.status}${result.excludedAt ? ' (excluded at ' + result.excludedAt + ')' : ''}${result.inconclusiveReason ? ' - ' + result.inconclusiveReason : ''}`);
     result.screenerLog = buildScreenerLog(result);
     if (runId) saveCompanyToDb(runId, result);
     res.json(result);
@@ -2699,7 +2699,7 @@ app.post('/api/screen', async (req, res) => {
       /rate.?limit/i.test(errMsg) ||
       /overloaded/i.test(errMsg) ||
       /internal server error/i.test(errMsg);
-    console.error(`  [${company}] âœ— ${isTransient ? '(transient â€” safe to re-run) ' : ''}${errMsg}`);
+    console.error(`  [${company}] âœ— ${isTransient ? '(transient - safe to re-run) ' : ''}${errMsg}`);
     const errorResult = {
       name: company,
       id: slugify(company),
@@ -2709,8 +2709,8 @@ app.post('/api/screen', async (req, res) => {
       excludedAt: null,
       excludedReason: '',
       inconclusiveReason: isTransient
-        ? 'Anthropic API hiccup (rate limit/overload/server error) â€” re-run this company individually, not a research failure'
-        : 'Screening error â€” see server console',
+        ? 'Anthropic API hiccup (rate limit/overload/server error) - re-run this company individually, not a research failure'
+        : 'Screening error - see server console',
       assets: [],
       beoneAnalyzed: false,
       beoneOutcome: null,
@@ -2725,7 +2725,7 @@ app.post('/api/screen', async (req, res) => {
 
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Website Track endpoint â€” supplemental research for thin-coverage companies
+// Website Track endpoint - supplemental research for thin-coverage companies
 // already found in Citeline. Skips primary Citeline query and runs the
 // secondary WEBSITE track with the provided URL.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2733,7 +2733,7 @@ app.post('/api/screen', async (req, res) => {
 app.post('/api/screen/website-track', async (req, res) => {
   const { companyName, websiteUrl } = req.body;
   if (!companyName) return res.status(400).json({ error: 'Missing companyName' });
-  if (!websiteUrl)  return res.status(400).json({ error: 'Missing websiteUrl â€” thin-coverage company must have a Citeline website URL' });
+  if (!websiteUrl)  return res.status(400).json({ error: 'Missing websiteUrl - thin-coverage company must have a Citeline website URL' });
 
   const apiKey = process.env.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured.' });
@@ -2755,7 +2755,7 @@ app.post('/api/screen/website-track', async (req, res) => {
 });
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Auto-flag endpoint â€” "Flag High Priority Assets" button, run on-demand
+// Auto-flag endpoint - "Flag High Priority Assets" button, run on-demand
 // against already-screened companies, not part of the main /api/screen pass.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -2802,7 +2802,7 @@ app.post('/api/autoflag', async (req, res) => {
 });
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Company repository â€” deduplicated view across all runs
+// Company repository - deduplicated view across all runs
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/repository', requireAuth, async (req, res) => {
@@ -2853,7 +2853,7 @@ app.delete('/api/runs', requireAuth, async (req, res) => {
 });
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Excel export endpoint â€” downloads asset-level data for a run
+// Excel export endpoint - downloads asset-level data for a run
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const XLSX = require('xlsx');
