@@ -770,23 +770,28 @@ a:hover { text-decoration: underline; }
 .url-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   background: var(--gray-50);
   border: 1px solid var(--gray-200);
   border-radius: 6px;
   margin-bottom: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
 }
 
 .url-company {
   font-size: 13px;
   font-weight: 600;
-  min-width: 180px;
+  min-width: 130px;
+  max-width: 160px;
   flex-shrink: 0;
 }
 
 .url-input {
   flex: 1;
+  min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--gray-200);
   border-radius: 5px;
@@ -820,8 +825,9 @@ a:hover { text-decoration: underline; }
 
 .url-note {
   font-size: 11px;
-  color: var(--blue);
+  color: #dc2626;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .url-note-warn {
   color: #b45309;
