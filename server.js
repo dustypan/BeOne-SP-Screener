@@ -250,12 +250,6 @@ const TOOLS = [
   }
 ];
 
-// Delta scan â€” fetch_webpage only. No web_search: re-fetch the specific URLs
-// consulted in the original screen rather than running new searches.
-const DELTA_TOOLS = [
-  TOOLS.find(t => t.name === 'fetch_webpage'),
-];
-
 // Website input track â€” fetch_webpage + OneBD only. No web_search.
 // Used when re-screening a company that was not found in Citeline.
 const WEBSITE_INPUT_TOOLS = [
@@ -329,182 +323,6 @@ const CITELINE_TOOLS = [
     },
   },
 ];
-
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Repository recall helpers
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-async function lookupRecentScreening(companyName) {
-  try {
-    const row = await pool.query(`
-      SELECT result_json, screened_at
-      FROM screened_companies
-      WHERE company_name ILIKE $1
-        AND status != 'inconclusive'
-        AND screened_at > NOW() - INTERVAL '3 months'
-      ORDER BY screened_at DESC
-      LIMIT 1
-    `, [companyName]);
-    if (!row.rows.length) return null;
-    return {
-      result: row.rows[0].result_json,
-      screenedAt: new Date(row.rows[0].screened_at),
-    };
-  } catch (_) {
-    return null; // DB unavailable â€” fall through to full screen
-  }
-}
-
-// Collect every URL that was consulted during the original screening run.
-// Priority: allSourcesConsulted (server-side ground truth) â†' sources (Claude self-reported)
-//           â†' website â†' asset layer sources â†' externalSources (all fallbacks for older records).
-function extractStoredUrls(storedResult) {
-  const seen = new Set();
-  const urls = [];
-  function add(url, label) {
-    if (!url || seen.has(url)) return;
-    seen.add(url);
-    urls.push({ url, label: label || url });
-  }
-  // 1. Server-side capture â€” most reliable; every URL actually passed to fetch_webpage
-  for (const url of (storedResult.allSourcesConsulted || [])) {
-    add(url, null); // no label at this level; label resolved from sources array if present
-  }
-  // 2. Claude's self-reported sources (new schema) â€” provides descriptive labels
-  for (const s of (storedResult.sources || [])) {
-    if (s && s.url) add(s.url, s.label ? `${s.label} (${s.usedFor || s.type || ''})` : null);
-  }
-  // 3. Backward compat fallbacks for records predating allSourcesConsulted
-  if (storedResult.website) add(storedResult.website, 'Company website');
-  for (const a of (storedResult.assets || [])) {
-    for (const key of ['layer1', 'layer2', 'layer3', 'layer4', 'layer5']) {
-      const src = (a[key] || {}).source;
-      if (src) add(src, `${a.name || 'asset'} ${key} source`);
-    }
-  }
-  for (const s of (storedResult.externalSources || [])) {
-    if (s && s.url) add(s.url, s.title || s.note || null);
-  }
-  return urls;
-}
-
-async function deltaScreenWithClaude(companyName, storedResult, lastScreenedAt, client, websiteUrl) {
-  const lastScreenDate = lastScreenedAt.toISOString().slice(0, 10);
-  const assetSummary = (storedResult.assets || [])
-    .map(a => `${a.name} (${a.modality || '?'}, ${(a.targets || []).join('/') || '?'})`)
-    .join('; ') || 'none identified';
-  const exclusionSummary = storedResult.excludedAt
-    ? `${storedResult.excludedAt} â€” ${storedResult.excludedReason || ''}`
-    : 'none (qualifying or inconclusive)';
-
-  // Collect saved URLs. If the caller passed an explicit websiteUrl and it's not already in the
-  // stored sources, add it first so we always have at least one URL to re-fetch.
-  const storedUrls = extractStoredUrls(storedResult);
-  if (websiteUrl && !storedUrls.some(u => u.url === websiteUrl)) {
-    storedUrls.unshift({ url: websiteUrl, label: 'Company website (user-supplied)' });
-  }
-
-  const urlList = storedUrls.length > 0
-    ? storedUrls.map((u, i) => `  ${i + 1}. ${u.url}${u.label && u.label !== u.url ? ` â€” ${u.label}` : ''}`).join('\n')
-    : '  (none saved â€” no re-fetch possible)';
-
-  const messages = [{
-    role: 'user',
-    content: `You are running a RECALL DELTA SCAN â€” a lightweight re-check of pages already consulted during the original screen, NOT a full re-screen and NOT a web search.
-
-Company: "${companyName}"
-Last fully screened: ${lastScreenDate}
-Stored result: status=${storedResult.status}, type=${storedResult.type || 'unknown'}
-Known assets (${(storedResult.assets || []).length}): ${assetSummary}
-Previous exclusion: ${exclusionSummary}
-
-URLS FROM THE ORIGINAL SCREEN â€” re-fetch these and look for changes since ${lastScreenDate}:
-${urlList}
-
-YOUR TASK: Re-fetch each URL above (use fetch_webpage) and identify ONLY what has changed since ${lastScreenDate}. Do not run any web_search. Do not fetch any URL not listed above. Do not re-evaluate layers already assessed â€” just look for new pipeline entries, removed assets, or new Layer 4/5 disclosures.
-
-BUDGET: up to ${Math.min(storedUrls.length + 1, 4)} fetch_webpage calls. Stop as soon as you have enough.
-
-Return ONLY this JSON â€” no other text:
-{
-  "newAssets": [],
-  "removedAssets": [],
-  "layerChanges": {
-    "layer4": null,
-    "layer5": null
-  },
-  "deltaNotes": "Plain-English summary of changes since ${lastScreenDate}. Write 'No material changes found' if nothing changed.",
-  "scanDate": "${new Date().toISOString().slice(0, 10)}"
-}
-
-For newAssets, use the same schema as a full screening asset object (name, modality, targets, indication, phase, layer1-5 as inconclusive since not fully evaluated, overallStatus: "inconclusive", isPlatform: false, notes, flags: []).
-For layerChanges, each key is null or { "update": "one-sentence description", "source": "url" }.`,
-  }];
-
-  const MAX_DELTA_ITERATIONS = 5;
-  for (let i = 0; i < MAX_DELTA_ITERATIONS; i++) {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 2000,
-      temperature: 0,
-      tools: DELTA_TOOLS,
-      messages,
-    });
-    messages.push({ role: 'assistant', content: response.content });
-
-    if (response.stop_reason === 'end_turn') {
-      const textBlock = response.content.find(b => b.type === 'text');
-      const jsonMatch = textBlock && textBlock.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try { return JSON.parse(jsonMatch[0]); } catch (_) {}
-      }
-      return { deltaNotes: 'Delta scan returned no parseable result', newAssets: [], removedAssets: [], layerChanges: {} };
-    }
-
-    if (response.stop_reason === 'tool_use') {
-      const toolUses = response.content.filter(b => b.type === 'tool_use');
-      const toolResults = [];
-      for (const toolUse of toolUses) {
-        let output;
-        try {
-          output = await fetchWebpage(toolUse.input.url, toolUse.input.section);
-        } catch (e) {
-          output = `Tool error: ${e.message}`;
-        }
-        toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output });
-      }
-      messages.push({ role: 'user', content: toolResults });
-    }
-    // pause_turn: loop continues
-  }
-  return { deltaNotes: 'Delta scan hit iteration limit', newAssets: [], removedAssets: [], layerChanges: {} };
-}
-
-function mergeWithDelta(storedResult, delta, lastScreenedAt) {
-  const result = JSON.parse(JSON.stringify(storedResult)); // deep clone
-  result.recallTrack    = true;
-  result.lastScreenedAt = lastScreenedAt.toISOString();
-  result.deltaFindings  = delta.deltaNotes || 'No material changes found';
-  result.deltaScanDate  = delta.scanDate   || new Date().toISOString().slice(0, 10);
-
-  // Append newly found assets â€” mark them so the UI can distinguish them
-  if (delta.newAssets && delta.newAssets.length > 0) {
-    for (const a of delta.newAssets) a.isNewSinceRecall = true;
-    result.assets = [...(result.assets || []), ...delta.newAssets];
-  }
-
-  // Surface layer changes prominently in researchNotes
-  const lc = delta.layerChanges || {};
-  const layerNotes = [
-    lc.layer4 ? `Layer 4 update: ${lc.layer4.update}${lc.layer4.source ? ' â€” ' + lc.layer4.source : ''}` : null,
-    lc.layer5 ? `Layer 5 update: ${lc.layer5.update}${lc.layer5.source ? ' â€” ' + lc.layer5.source : ''}` : null,
-  ].filter(Boolean).join('\n');
-
-  const deltaHeader = `[Recall track â€” last screen: ${lastScreenedAt.toISOString().slice(0,10)}, delta: ${result.deltaScanDate}]\n${result.deltaFindings}${layerNotes ? '\n' + layerNotes : ''}`;
-  result.researchNotes = deltaHeader + (storedResult.researchNotes ? '\n---\n' + storedResult.researchNotes : '');
-
-  return result;
-}
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Screening methodology system prompt
@@ -2802,16 +2620,6 @@ function buildScreenerLog(result) {
   const lines = [];
   const tag = `[${result.name}]`;
 
-  if (result.recallTrack) {
-    lines.push(`${'â•'.repeat(50)}`);
-    lines.push(`${tag} [RECALL TRACK] Served from repository`);
-    lines.push(`${tag} Last full screen : ${(result.lastScreenedAt || '').slice(0, 10)}`);
-    lines.push(`${tag} Delta scan date  : ${result.deltaScanDate || 'â€”'}`);
-    lines.push(`${tag} Delta findings   : ${result.deltaFindings || 'No material changes found'}`);
-    lines.push(`${'â•'.repeat(50)}`);
-    lines.push('');
-  }
-
   lines.push(`${tag} Status: ${result.status.toUpperCase()}`);
   if (result.sourceTrack) {
     const trackLabel = result.sourceTrack === 'citeline' ? 'Citeline SQL (primary)' : 'Web research (secondary)';
@@ -2925,20 +2733,6 @@ app.post('/api/screen', async (req, res) => {
 
   try {
     const client = new Anthropic({ apiKey, maxRetries: 5 });
-
-    // â”€â”€ Repository recall check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const recent = await lookupRecentScreening(company);
-    if (recent) {
-      const ageDays = Math.round((Date.now() - recent.screenedAt.getTime()) / 86400000);
-      console.log(`    [${company}] [recall-track] Found in repository (screened ${recent.screenedAt.toISOString().slice(0,10)}, ${ageDays}d ago) â€” running delta scan`);
-      const delta  = await deltaScreenWithClaude(company, recent.result, recent.screenedAt, client, websiteUrl || recent.result.website || null);
-      const result = mergeWithDelta(recent.result, delta, recent.screenedAt);
-      console.log(`    [${company}] [recall-track] Delta: ${result.deltaFindings}`);
-      result.screenerLog = buildScreenerLog(result);
-      if (runId) saveCompanyToDb(runId, result);
-      return res.json(result);
-    }
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     const result = await screenWithClaude(company, client, websiteUrl || null, { skipCiteline: !!skipPharmcube });
     applyAutoFlags(result);
