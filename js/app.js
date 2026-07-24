@@ -354,7 +354,7 @@ function renderSummary() {
     if (inconclusive.length === 0) { el.innerHTML = '<p class="empty-msg">None</p>'; return; }
     el.innerHTML = inconclusive.map(c => `
       <div class="bucket-item">
-        <span class="bucket-company">${escHtml(c.name)}</span>
+        <strong class="bucket-company">${escHtml(c.name || c.id || '—')}</strong>
       </div>`
     ).join('');
   })();
@@ -479,7 +479,7 @@ function renderAsk1() {
     }
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
-      <span class="url-company">${escHtml(c.name)}</span>
+      <strong class="url-company">${escHtml(c.name || c.id || '—')}</strong>
       <div class="url-input-row">
         <input type="url" class="url-input" placeholder="https://company.com/pipeline"
           value="${escHtml(state.websiteInputs[c.id] || '')}"
