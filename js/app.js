@@ -26,6 +26,7 @@ const state = {
 
   // Results view
   hidingCompetitors: true,
+  hideExcluded: true,
   searchQuery: '',
 
   // Current screening run (DB-backed)
@@ -955,11 +956,11 @@ function renderResults() {
     renderResultsTable();
   };
 
-  // Show screened-out toggle
-  const screenedOutToggle = document.getElementById('show-screened-out-toggle');
-  screenedOutToggle.checked = state.showScreenedOut || false;
-  screenedOutToggle.onchange = e => {
-    state.showScreenedOut = e.target.checked;
+  // Hide-excluded toggle (checked = excluded assets hidden)
+  const hideExcludedToggle = document.getElementById('hide-excluded-toggle');
+  hideExcludedToggle.checked = state.hideExcluded;
+  hideExcludedToggle.onchange = e => {
+    state.hideExcluded = e.target.checked;
     renderResultsTable();
   };
 
@@ -982,10 +983,8 @@ function renderResults() {
 
 function getFilteredAssets(company) {
   return (company.assets || []).filter(a => {
-    // Step 4 (rights) and Step 5 (manufacturing) excluded assets always shown — red shading inline
-    if (a.overallStatus === 'excluded' && a.layer4 && a.layer4.status === 'fail') return true;
-    if (a.overallStatus === 'excluded' && a.layer5 && a.layer5.status === 'fail') return true;
-    if (a.overallStatus === 'excluded' && !state.showScreenedOut) return false;
+    // All excluded assets (competitor, licensing, manufacturing, etc.) respect the toggle
+    if (a.overallStatus === 'excluded' && state.hideExcluded) return false;
     if (state.hidingCompetitors && a.layer3 && a.layer3.status === 'fail') return false;
     return true;
   });
