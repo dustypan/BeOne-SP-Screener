@@ -278,23 +278,28 @@
     </div>
     <div id="autoflag-status" class="autoflag-status hidden"></div>
 
-    <div class="results-section-bar results-section-bar--qualifying">✓ Qualifying</div>
-
-    <div class="results-table-wrap">
+    <!-- ── Qualifying: sticky unit (section bar + column header) ── -->
+    <div class="results-sticky-unit">
+      <div class="results-section-bar results-section-bar--qualifying">✓ Qualifying</div>
+      <table class="results-table results-header-table">
+        <colgroup>
+          <col class="rcol-company"><col class="rcol-asset"><col class="rcol-modality">
+          <col class="rcol-targets"><col class="rcol-phase"><col class="rcol-indication"><col class="rcol-flags">
+        </colgroup>
+        <thead><tr>
+          <th>Company</th><th>Asset</th><th>Modality</th>
+          <th>Target(s)</th><th>Phase</th><th>Indication</th><th>Flags</th>
+        </tr></thead>
+      </table>
+    </div>
+    <div class="results-table-wrap results-body-wrap">
       <table class="results-table">
-        <thead>
-          <tr>
-            <th>Company</th>
-            <th>Asset</th>
-            <th>Modality</th>
-            <th>Target(s)</th>
-            <th>Phase</th>
-            <th>Indication</th>
-            <th>Flags</th>
-          </tr>
-        </thead>
+        <colgroup>
+          <col class="rcol-company"><col class="rcol-asset"><col class="rcol-modality">
+          <col class="rcol-targets"><col class="rcol-phase"><col class="rcol-indication"><col class="rcol-flags">
+        </colgroup>
         <tbody id="results-tbody">
-          <tr><td colspan="5" class="empty-cell">Loading results…</td></tr>
+          <tr><td colspan="7" class="empty-cell">Loading results…</td></tr>
         </tbody>
       </table>
     </div>
@@ -305,40 +310,52 @@
       <button id="page-next" class="btn-page">Next →</button>
     </div>
 
-    <!-- Excluded (all types merged) -->
+    <!-- ── Excluded: sticky unit + body ───────────────────────── -->
     <div id="excluded-footer" class="hidden">
-      <div class="results-section-bar results-section-bar--excluded">✗ Excluded</div>
-      <div class="results-table-wrap">
+      <div class="results-sticky-unit results-sticky-unit--sub">
+        <div class="results-section-bar results-section-bar--excluded">✗ Excluded</div>
+        <table class="results-table results-header-table">
+          <colgroup>
+            <col class="rcol-exc-company"><col class="rcol-exc-at"><col class="rcol-exc-reason">
+            <col class="rcol-exc-source"><col class="rcol-exc-console"><col class="rcol-exc-sources">
+          </colgroup>
+          <thead><tr>
+            <th>Company</th><th>Excluded At</th><th>Reason</th>
+            <th>Source</th><th>Console</th><th>Sources</th>
+          </tr></thead>
+        </table>
+      </div>
+      <div class="results-table-wrap results-body-wrap">
         <table class="results-table">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Excluded At</th>
-              <th>Reason</th>
-              <th>Source</th>
-              <th>Console</th>
-              <th>Sources</th>
-            </tr>
-          </thead>
+          <colgroup>
+            <col class="rcol-exc-company"><col class="rcol-exc-at"><col class="rcol-exc-reason">
+            <col class="rcol-exc-source"><col class="rcol-exc-console"><col class="rcol-exc-sources">
+          </colgroup>
           <tbody id="excluded-tbody"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- Inconclusives footer -->
+    <!-- ── Inconclusives: sticky unit + body ──────────────────── -->
     <div id="inconclusives-footer" class="hidden">
-      <h3>⚠ Unresolved Inconclusives</h3>
-      <div class="results-table-wrap">
+      <div class="results-sticky-unit results-sticky-unit--sub">
+        <div class="results-section-bar results-section-bar--inconclusive">⚠ Inconclusive</div>
+        <table class="results-table results-header-table">
+          <colgroup>
+            <col class="rcol-inc-company"><col class="rcol-inc-reason">
+            <col class="rcol-inc-source"><col class="rcol-inc-console"><col class="rcol-inc-sources">
+          </colgroup>
+          <thead><tr>
+            <th>Company</th><th>Reason</th><th>Source</th><th>Console</th><th>Sources</th>
+          </tr></thead>
+        </table>
+      </div>
+      <div class="results-table-wrap results-body-wrap">
         <table class="results-table">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Reason</th>
-              <th>Source</th>
-              <th>Console</th>
-              <th>Sources</th>
-            </tr>
-          </thead>
+          <colgroup>
+            <col class="rcol-inc-company"><col class="rcol-inc-reason">
+            <col class="rcol-inc-source"><col class="rcol-inc-console"><col class="rcol-inc-sources">
+          </colgroup>
           <tbody id="inconclusives-tbody"></tbody>
         </table>
       </div>

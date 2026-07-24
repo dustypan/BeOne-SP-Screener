@@ -901,35 +901,81 @@ tr.row-paused td { background: var(--amber-lt); }
   border-top: 1px solid var(--gray-200);
 }
 
-/* ── Results section-group bars (Qualifying / Excluded) ─────── */
-.results-section-bar {
+/* ── Sticky unit: section bar + column header together ───────── */
+.results-sticky-unit {
   position: sticky;
-  top: 53px;
+  top: 53px;          /* sits flush below the toolbar */
   z-index: 15;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0,0,0,.08);
+}
+/* Sub-sections (Excluded, Inconclusive) get extra top margin via their parent */
+#excluded-footer      { margin-top: 32px; }
+#inconclusives-footer { margin-top: 32px; }
+
+/* ── Section-group label bars ────────────────────────────────── */
+.results-section-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 0 16px;
   height: 36px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .4px;
-  border-radius: 0;
-  margin: 0 0 0 0;
 }
 .results-section-bar--qualifying {
   background: #f0fdf4;
   color: #15803d;
-  border-top: 2px solid #86efac;
   border-bottom: 1px solid #bbf7d0;
 }
 .results-section-bar--excluded {
   background: #fef2f2;
   color: #b91c1c;
-  border-top: 2px solid #fca5a5;
   border-bottom: 1px solid #fecaca;
-  margin-top: 28px;
 }
+.results-section-bar--inconclusive {
+  background: #fffbeb;
+  color: #92400e;
+  border-bottom: 1px solid #fde68a;
+}
+
+/* ── Header table (thead only, inside sticky unit) ───────────── */
+.results-header-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* ── Body-only table wrap (no thead, connects below sticky unit) */
+.results-body-wrap {
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* ── Qualifying column widths (7 cols) ───────────────────────── */
+.rcol-company    { width: 19%; }
+.rcol-asset      { width: 14%; }
+.rcol-modality   { width: 10%; }
+.rcol-targets    { width: 15%; }
+.rcol-phase      { width: 9%;  }
+.rcol-indication { width: 16%; }
+.rcol-flags      { width: 17%; }
+
+/* ── Excluded column widths (6 cols) ─────────────────────────── */
+.rcol-exc-company { width: 22%; }
+.rcol-exc-at      { width: 11%; }
+.rcol-exc-reason  { width: 31%; }
+.rcol-exc-source  { width: 13%; }
+.rcol-exc-console { width: 10%; }
+.rcol-exc-sources { width: 13%; }
+
+/* ── Inconclusive column widths (5 cols) ─────────────────────── */
+.rcol-inc-company { width: 23%; }
+.rcol-inc-reason  { width: 33%; }
+.rcol-inc-source  { width: 19%; }
+.rcol-inc-console { width: 12%; }
+.rcol-inc-sources { width: 13%; }
 
 /* ── Results Section ──────────────────────────────────────── */
 .results-toolbar {
@@ -1009,9 +1055,6 @@ tr.row-paused td { background: var(--amber-lt); }
   padding: 10px 14px;
   text-align: left;
   white-space: nowrap;
-  position: sticky;
-  top: 89px;
-  z-index: 5;
 }
 
 .results-table tbody tr {
