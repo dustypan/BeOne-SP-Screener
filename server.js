@@ -1478,9 +1478,13 @@ function closeNameMatch(searchName, citeName) {
   const a = norm(searchName);
   const b = norm(citeName);
   if (a === b) return true;
-  // Allow containment (e.g. "Zymeworks BC" contains "Zymeworks")
-  if (a.length > 3 && b.includes(a)) return true;
-  if (b.length > 3 && a.includes(b)) return true;
+  // Allow whole-word containment: "Zymeworks BC" ∋ "Zymeworks", "Hoffmann-La Roche" ∋ "Roche"
+  // Uses word-boundary matching (space-delimited) to prevent substring-inside-word false positives,
+  // e.g. "heidelberg pharma" must NOT match "berg" just because "berg" is inside "heidelberg".
+  const wordContains = (haystack, needle) =>
+    new RegExp('(?:^|\\s)' + needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s|$)').test(haystack);
+  if (a.length > 3 && wordContains(b, a)) return true;
+  if (b.length > 3 && wordContains(a, b)) return true;
   // Stem match: strip ALL company-type descriptors (Biologics, Therapeutics, etc.)
   // so "Duality Biologics" matches "Duality Biosciences" — the brand name is what matters
   const sa = stemCompany(searchName);
