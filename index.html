@@ -137,7 +137,7 @@
 <section id="section-rescreening" class="section">
   <div class="page-content">
     <div class="loading-title">Screening inconclusives…</div>
-    <p class="ask-sub">Re-running all inconclusive companies from Ask 1 — using the URL you provided where given — before loading the final results.</p>
+    <p class="ask-sub">Screening companies via the website input track — fetching the pipeline URLs you provided — before loading the final results.</p>
     <div class="progress-wrap">
       <div id="rescreen-progress-bar-fill"></div>
     </div>
@@ -210,7 +210,7 @@
     <div class="wizard-header">
       <!-- Step dots -->
       <div class="step-indicator">
-        <div class="step-dot" title="Ask 1: Website Input">1</div>
+        <div class="step-dot" title="Ask 1: Website Input Needed">1</div>
         <div class="step-line"></div>
         <div class="step-dot" title="Ask 2: Met With">2</div>
         <div class="step-line"></div>
@@ -223,11 +223,11 @@
     <div class="card">
       <div class="card-body">
 
-        <!-- Ask 1: Website Input -->
+        <!-- Ask 1: Website Input Needed -->
         <div class="ask-panel" id="ask-1">
-          <div class="ask-title">Ask 1 — Rerun Inconclusives</div>
-          <div class="ask-sub">The following companies came back inconclusive during screening (no website found, or hit the research budget before finishing). Provide a URL if you have one to speed up the rerun — leave blank if no website exists or none is needed. All of these will be re-screened before the final results load.</div>
-          <p id="ask1-none-msg" class="empty-msg hidden">No inconclusive companies to rerun.</p>
+          <div class="ask-title">Website Input Needed</div>
+          <div class="ask-sub">The following companies were not found in the Citeline database. Please input the company <strong>pipeline page URL</strong> (preferred) or company website URL below. The screener will fetch the provided URL directly — no web search will be run.</div>
+          <p id="ask1-none-msg" class="empty-msg hidden">No companies require website input.</p>
           <div id="ask1-companies"></div>
         </div>
 
