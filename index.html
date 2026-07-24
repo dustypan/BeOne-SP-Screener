@@ -46,15 +46,25 @@
       <div class="criteria-divider"></div>
       <div class="criteria-col">
         <div class="criteria-heading">How to Use</div>
-        <ul class="criteria-list how-list">
-          <li><span class="ci-info">→</span><strong>Target filter:</strong><span>Narrow qualifying assets by MoA using the target selector</span></li>
-          <li><span class="ci-info">→</span><strong>Sources:</strong><span>View external sources consulted for each company’s screening data</span></li>
-          <li><span class="ci-info">→</span><strong>Console:</strong><span>See step-by-step screening rationale and errors for any company</span></li>
-          <li><span class="ci-info">→</span><strong>Flags:</strong><span>Applied automatically based on indication and phase signals</span></li>
+        <ul class="criteria-list">
+          <li><span class="ci-info">→</span> Use the <strong>MoA / Target filter</strong> (Ask 3) to narrow by mechanism of action</li>
+          <li><span class="ci-info">→</span> Use the <strong>🚩 Flag High Priority Assets</strong> button to surface synergy signals across strategic, indication, and phase dimensions</li>
+          <li><span class="ci-info">→</span> Click <strong>🔗 Sources</strong> on any company row to see every source consulted during screening and which criteria each informed</li>
+          <li><span class="ci-info">→</span> Click <strong>Console</strong> on any inconclusive entry to see the full step-by-step screening rationale</li>
         </ul>
       </div>
     </div>
 
+    <div class="card upload-card">
+      <div class="card-body api-key-section">
+        <label for="api-key-input" class="api-key-label">Anthropic API Key</label>
+        <div class="api-key-row">
+          <input type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
+          <button id="api-key-save-btn" class="btn-secondary">Save</button>
+        </div>
+        <span id="api-key-status" class="api-key-status missing">No key saved — paste your Anthropic API key above</span>
+      </div>
+    </div>
 
     <div class="card upload-card">
       <div class="card-body">
@@ -127,7 +137,7 @@
 <section id="section-rescreening" class="section">
   <div class="page-content">
     <div class="loading-title">Screening inconclusives…</div>
-    <p class="ask-sub">Re-running all inconclusive companies from Ask 1 — using the URL you provided where given — before loading the final results.</p>
+    <p class="ask-sub">Screening companies via the website input track — fetching the pipeline URLs you provided — before loading the final results.</p>
     <div class="progress-wrap">
       <div id="rescreen-progress-bar-fill"></div>
     </div>
@@ -146,9 +156,9 @@
       <!-- Qualifying -->
       <div class="bucket-card qualifying">
         <div class="bucket-head">
-          <div class="bucket-icon">&#10003;</div>
+          <div class="bucket-icon">✓</div>
           <div class="bucket-label">
-            <div class="bucket-label-title">Qualifying</div>
+            <div class="bucket-label-title">✓ Qualifying</div>
             <div class="bucket-count" id="count-qualifying">0</div>
           </div>
           <button class="bucket-toggle" title="Expand/collapse">▼</button>
@@ -159,9 +169,9 @@
       <!-- Excluded -->
       <div class="bucket-card excluded">
         <div class="bucket-head">
-          <div class="bucket-icon">X</div>
+          <div class="bucket-icon">✗</div>
           <div class="bucket-label">
-            <div class="bucket-label-title">Excluded</div>
+            <div class="bucket-label-title">✗ Excluded</div>
             <div class="bucket-count" id="count-excluded">0</div>
           </div>
           <button class="bucket-toggle" title="Expand/collapse">▼</button>
@@ -200,7 +210,7 @@
     <div class="wizard-header">
       <!-- Step dots -->
       <div class="step-indicator">
-        <div class="step-dot" title="Ask 1: Website Input">1</div>
+        <div class="step-dot" title="Ask 1: Website Input Needed">1</div>
         <div class="step-line"></div>
         <div class="step-dot" title="Ask 2: Met With">2</div>
         <div class="step-line"></div>
@@ -213,11 +223,11 @@
     <div class="card">
       <div class="card-body">
 
-        <!-- Ask 1: Website Input -->
+        <!-- Ask 1: Website Input Needed -->
         <div class="ask-panel" id="ask-1">
-          <div class="ask-title">Ask 1 — Rerun Inconclusives</div>
-          <div class="ask-sub">The following companies came back inconclusive during screening (no website found, or hit the research budget before finishing). Provide a URL if you have one to speed up the rerun — leave blank if no website exists or none is needed. All of these will be re-screened before the final results load.</div>
-          <p id="ask1-none-msg" class="empty-msg hidden">No inconclusive companies to rerun.</p>
+          <div class="ask-title">Website Input Needed</div>
+          <div class="ask-sub">The following companies were not found in the Citeline database. Please input the company <strong>pipeline page URL</strong> (preferred) or company website URL below. The screener will fetch the provided URL directly — no web search will be run.</div>
+          <p id="ask1-none-msg" class="empty-msg hidden">No companies require website input.</p>
           <div id="ask1-companies"></div>
         </div>
 
@@ -273,14 +283,10 @@
         Exclude screened-out assets
       </label>
       <span id="results-asset-count"></span>
-      <button id="run-console-btn" class="btn-outline">📋 Console</button>
+      <button id="autoflag-btn" class="btn-outline">🚩 Flag High Priority Assets</button>
       <button id="export-csv-btn" class="btn-outline">⬇ Export CSV</button>
     </div>
-
-    <div class="results-section-label qualifying">
-      <div class="rsl-icon">&#10003;</div>
-      <span class="rsl-title">Qualifying</span>
-    </div>
+    <div id="autoflag-status" class="autoflag-status hidden"></div>
 
     <div class="results-table-wrap">
       <table class="results-table">
@@ -307,12 +313,26 @@
       <button id="page-next" class="btn-page">Next →</button>
     </div>
 
+    <!-- All-assets-excluded qualifying companies -->
+    <div id="all-excluded-footer" class="hidden">
+      <h3 class="all-excluded-heading">✗ Excluded Companies (all assets out-licensed or covered)</h3>
+      <div class="results-table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Assets</th>
+              <th>Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="all-excluded-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Excluded footer -->
     <div id="excluded-footer" class="hidden">
-      <div class="results-section-label excluded">
-        <div class="rsl-icon">&#10007;</div>
-        <span class="rsl-title">Excluding</span>
-      </div>
+      <h3>✗ Excluded</h3>
       <div class="results-table-wrap">
         <table class="results-table">
           <thead>
@@ -332,10 +352,7 @@
 
     <!-- Inconclusives footer -->
     <div id="inconclusives-footer" class="hidden">
-      <div class="results-section-label inconclusive">
-        <div class="rsl-icon">?</div>
-        <span class="rsl-title">Inconclusive</span>
-      </div>
+      <h3>⚠ Unresolved Inconclusives</h3>
       <div class="results-table-wrap">
         <table class="results-table">
           <thead>
@@ -453,9 +470,6 @@
 <script src="js/data.js"></script>
 <script src="js/screener.js"></script>
 <script src="js/app.js"></script>
-
-<!-- Floating Console Button (always visible) -->
-<button id="global-console-btn" class="global-console-fab">📋 Console</button>
 
 </body>
 </html>

@@ -506,7 +506,9 @@ function renderAsk1() {
   container.innerHTML = allInconclusive.map(c => {
     const isPaused = c.status === 'paused';
     const isSkipped = state.skippedInconclusives.has(c.id);
-    const notFoundInPharmcube = /not found in pharmcube/i.test(c.inconclusiveReason || '');
+    // Needs website input if not found in Citeline/Pharmcube
+    const needsWebsiteInput = /not found in (citeline|pharmcube)/i.test(c.inconclusiveReason || '')
+      || c.sourceTrack === 'website-input';
     if (isPaused) {
       return `
     <div class="url-row url-row-paused" data-id="${escHtml(c.id)}">
@@ -519,13 +521,13 @@ function renderAsk1() {
     return `
     <div class="url-row${isSkipped ? ' url-row-skipped' : ''}" data-id="${escHtml(c.id)}">
       <span class="url-company">${escHtml(c.name)}</span>
-      <span class="url-reason">${escHtml(c.inconclusiveReason || 'Inconclusive')}</span>
-      ${notFoundInPharmcube
-        ? `<span class="url-note">⚡ Will use URL you provide — Pharmcube skipped</span>`
+      <span class="url-reason">${escHtml(c.inconclusiveReason || 'Not found in Citeline database')}</span>
+      ${needsWebsiteInput
+        ? `<span class="url-note">↗ Paste <strong>pipeline page URL</strong> (preferred) or company website below</span>`
         : /website unreadable/i.test(c.inconclusiveReason || '')
           ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL or skip</span>`
           : ''}
-      <input type="url" class="url-input" placeholder="https://… (optional)"
+      <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
         value="${escHtml(state.websiteInputs[c.id] || '')}"
         data-id="${escHtml(c.id)}"
         ${isSkipped ? 'disabled' : ''}>
@@ -626,10 +628,11 @@ async function runRescreening() {
 
   async function rescreenOne(company) {
     const websiteUrl = state.websiteInputs[company.id] || company.website || null;
-    // If the company wasn't found in Pharmcube during the first run, skip Pharmcube
-    // and go straight to secondary track with the user-provided URL
-    const notFoundInPharmcube = /not found in pharmcube/i.test(company.inconclusiveReason || '');
-    const skipPharmcube = notFoundInPharmcube;
+    // If the company wasn't found in Citeline/Pharmcube, skip the database lookup
+    // and go straight to the website input track with the user-provided URL
+    const notFoundInDatabase = /not found in (citeline|pharmcube)/i.test(company.inconclusiveReason || '')
+      || company.sourceTrack === 'website-input';
+    const skipPharmcube = notFoundInDatabase;
     try {
       const resp = await fetch('/api/screen', {
         method: 'POST',
