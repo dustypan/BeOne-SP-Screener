@@ -253,7 +253,7 @@ async function runScreener(names) {
       try {
         const resp = await fetch('/api/screen', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ company: name, runId: state.currentRunId }),
         });
 
@@ -538,7 +538,7 @@ async function continueCompanyScreening(companyId) {
   try {
     const resp = await fetch('/api/screen/resume', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company: company.name,
         runId: state.currentRunId,
@@ -591,7 +591,7 @@ async function runRescreening() {
     try {
       const resp = await fetch('/api/screen', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           company: company.name,
           runId: state.currentRunId,
@@ -1478,7 +1478,7 @@ async function runAutoFlag() {
     try {
       const resp = await fetch('/api/autoflag', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': getApiKey() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company }),
       });
 
@@ -2111,7 +2111,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   loadPersisted();
-  initApiKey();
   initUpload();
   initColumnPicker();
   initSummary();
