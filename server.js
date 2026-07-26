@@ -2378,10 +2378,12 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
   if (!skipCiteline && (citelineByName || DefaultAzureCredential)) {
     console.log(`    [${companyName}] [primary-track] Citeline SQL`);
     let citelineResult = null;
+    let citelineError  = null;
     try {
       citelineResult = await screenWithCitelinePrimary(companyName, client);
     } catch (e) {
-      console.log(`    [${companyName}] [citeline] [error] ${e.message} - returning inconclusive for website input`);
+      citelineError = e.message;
+      console.log(`    [${companyName}] [citeline] [error] ${e.message} - falling through to website input`);
     }
     if (citelineResult) {
       applyAutoFlags(citelineResult);
@@ -2389,8 +2391,11 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' - excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' - ' + citelineResult.inconclusiveReason : ''}`);
       return citelineResult;
     }
-    // Not found or error - return inconclusive immediately for website input
-    console.log(`    [${companyName}] [citelineâ†'website-input] Not found in Citeline - routing to website input`);
+    // Distinguish 'not found in Citeline' from 'found but screening threw an error'
+    const inconclusiveReason = citelineError
+      ? `Citeline screening error - website input needed (${citelineError.slice(0, 120)})`
+      : 'Not found in Citeline database - website input needed';
+    console.log(`    [${companyName}] [citeline→website-input] ${inconclusiveReason}`);
     return {
       id: slugify(companyName),
       name: companyName.replace(/BeiGene/gi, 'BeOne'),
@@ -2401,7 +2406,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       excludedAt: null,
       excludedReason: '',
       excludedSource: '',
-      inconclusiveReason: 'Not found in Citeline database - website input needed',
+      inconclusiveReason,
       assets: [],
       deals: [],
       beoneAnalyzed: false,
