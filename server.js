@@ -1646,7 +1646,7 @@ function getAllKeywords(name) {
     .map(w => w.replace(/[^a-z0-9]/g, ''))
     .filter(w => w.length >= 3 && !skip.has(w));
 }
-let exclusionsIndex = null; // map: stemmedCompanyName → exclusion record
+let exclusionsIndex = null; // map: exact companyName → exclusion record
 
 function loadCitelineSpreadsheet() {
   const candidates = [
@@ -1702,9 +1702,9 @@ function loadExclusionsSpreadsheet() {
   if (oncNonBiolSheet) {
     const rows = XLSX.utils.sheet_to_json(oncNonBiolSheet);
     for (const row of rows) {
-      const stem = stemCompany(row.companyName);
-      if (!stem || stem.length < 3) continue;
-      exclusionsIndex[stem] = { bucket: 'ONC_NON_BIOL', assets: row.oncologyAssets || '', companyName: row.companyName };
+      const cn = row.companyName;
+      if (!cn) continue;
+      exclusionsIndex[cn] = { bucket: 'ONC_NON_BIOL', assets: row.oncologyAssets || '', companyName: cn };
     }
     console.log(`[exclusions] ONC, NON-BIOL: ${rows.length} companies`);
   }
@@ -1713,32 +1713,40 @@ function loadExclusionsSpreadsheet() {
   if (nonOncSheet) {
     const rows = XLSX.utils.sheet_to_json(nonOncSheet);
     for (const row of rows) {
-      const stem = stemCompany(row.companyName);
-      if (!stem || stem.length < 3) continue;
-      if (!exclusionsIndex[stem]) {
-        exclusionsIndex[stem] = { bucket: 'NON_ONC', indications: row.indicationGroups || '', companyName: row.companyName };
-      }
+      const cn = row.companyName;
+      if (!cn || exclusionsIndex[cn]) continue;
+      exclusionsIndex[cn] = { bucket: 'NON_ONC', indications: row.indicationGroups || '', companyName: cn };
     }
     console.log(`[exclusions] NON ONC: ${rows.length} companies`);
   }
 
-  console.log(`[exclusions] Ready: ${Object.keys(exclusionsIndex).length} total stems`);
+  console.log(`[exclusions] Ready: ${Object.keys(exclusionsIndex).length} companies`);
 }
 
 function checkExclusions(companyName) {
   if (!exclusionsIndex) return null;
-  const needle = stemCompany(companyName);
-  if (!needle || needle.length < 3) return null;
+  const root = getRootWord(companyName);
+  if (!root || root.length < 3) return null;
 
-  let match = exclusionsIndex[needle];
-  if (!match) {
-    const entry = Object.entries(exclusionsIndex).find(([stem]) =>
-      needle.length >= 4 && stem.length >= 4 && (stem.includes(needle) || needle.includes(stem))
-    );
-    if (entry) match = entry[1];
+  // Stage 1: root-word substring scan (same as citelineGetAssetsLocal)
+  let candidates = Object.keys(exclusionsIndex)
+    .filter(cn => cn.toLowerCase().includes(root));
+
+  // Stage 2: closeNameMatch guard
+  let matched = candidates.find(cn => closeNameMatch(companyName, cn));
+
+  // Stage 3: keyword-overlap fallback (handles city-prefix variants)
+  if (!matched && candidates.length === 0) {
+    const keywords = getAllKeywords(companyName);
+    const fallback = Object.keys(exclusionsIndex).find(cn => {
+      const flat = cn.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return keywords.length > 0 && keywords.every(k => flat.includes(k));
+    });
+    if (fallback) matched = fallback;
   }
-  if (!match) return null;
-  if (!closeNameMatch(companyName, match.companyName)) return null;
+
+  if (!matched) return null;
+  const match = exclusionsIndex[matched];
 
   if (match.bucket === 'ONC_NON_BIOL') {
     const assetList = (match.assets || '').split(';').map(s => s.trim()).filter(Boolean).slice(0, 5).join(', ') || 'non-biologic assets';
