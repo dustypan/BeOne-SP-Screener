@@ -531,7 +531,7 @@ function renderAsk1() {
           ? `<span class="url-note url-note-warn">🔒 Site found but unreadable — provide an alternative URL here</span>`
           : `<span class="url-note">↗ Paste <strong>pipeline page URL</strong> (preferred) or company website here</span>`}
       <input type="url" class="url-input" placeholder="https://company.com/pipeline (preferred) or https://company.com"
-        value="${escHtml(state.websiteInputs[c.id] || c.website || '')}"
+        value="${escHtml(state.websiteInputs[c.id] || c.pipelineUrl || c.website || '')}"
         data-id="${escHtml(c.id)}"
         ${isSkipped ? 'disabled' : ''}>
       <button class="btn-skip-inconclusive${isSkipped ? ' is-skipped' : ''}" data-id="${escHtml(c.id)}">

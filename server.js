@@ -298,9 +298,8 @@ const WEBSITE_INPUT_TOOLS = [
   TOOLS.find(t => t.name === 'onebd_resolve_asset'),
 ].filter(Boolean);
 
-// Website input track with web_search fallback — used when no URL was provided.
-// Max 3 searches to locate the pipeline page, then proceeds identically to the URL track.
-const WEBSITE_INPUT_SEARCH_TOOLS = [
+// Website search track — web_search (max 3) + fetch_webpage + OneBD. Used when no URL provided.
+const WEBSITE_SEARCH_TOOLS = [
   { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
   TOOLS.find(t => t.name === 'fetch_webpage'),
   TOOLS.find(t => t.name === 'onebd_resolve_company'),
@@ -706,7 +705,16 @@ ASSET MATCHING - only needed for deals that scope to a specific asset or modalit
   No tool call needed. For Step 5 manufacturing deals: set layer5: fail for every asset of that
   modality type (e.g. "bsAb mfg partner" â†' layer5: fail on ALL bsAb assets in the pipeline).
 
-  Step B - for deals where scope = "specific-asset" and deal.assets[] lists named compounds:
+  FUTURE-SCOPE EXCEPTION: If the deal title or summary contains language indicating it covers only
+  future or next-generation assets -- e.g. "next generation", "next-gen", "next-generation",
+  "future assets", "future programs", "future pipeline", "future candidates", "to be developed",
+  "arising from", "newly developed", "future collaboration targets", "options on future" -- then
+  the deal does NOT apply to existing named assets already in the Citeline pipeline. Existing
+  assets of that modality type PASS Step 4 despite the deal. Note in researchNotes:
+  "Deal '[title]' covers future/next-gen [modality] only -- existing assets not in scope. Pass."
+
+
+  Step B â€” for deals where scope = "specific-asset" and deal.assets[] lists named compounds:
   Match using the asset's drugId, primary name, AND altNames (synonym list from Citeline).
   For each name in deal.assets[]:
     1. Check against asset.name and every entry in asset.altNames (brand names, INNs, research codes).
@@ -775,13 +783,14 @@ Step 4 - Licensing/Rights (per asset still passing after Step 3):
 
  - transaction_type contains "Option" OR "License Option" OR agreement_type contains "Option" â†'
     layer3: fail, excluded regardless of territory.
-    Note in asset notes: "License option granted - asset encumbered. Partner: [name], Date: [date]"
- - Deal with explicit rights-transfer language, territory = Global or US â†' layer3: fail, excluded (note partner + date)
- - Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) â†' layer3: pass
- - Deal with explicit rights-transfer language, territory unspecified or empty â†' layer3: fail, excluded
-    Note in asset notes: "Out-licensed - no territory disclosed, assumed global. Partner: [name], Date: [date]"
- - Collaboration / co-development with no rights-transfer language â†' layer3: pass (note deal in researchNotes)
- - No matching rights-transfer deal â†' layer3: pass
+    Note in asset notes: "License option granted â€” asset encumbered. Partner: [name], Date: [date]"
+  â€” Deal with explicit rights-transfer language, territory = Global or US â†' layer3: fail, excluded (note partner + date)
+  â€” Deal with explicit rights-transfer language, territory = ex-US only (China, APAC, Europe explicitly stated) â†' layer3: pass
+  â€” Deal with explicit rights-transfer language, territory unspecified or empty â†' layer3: fail, excluded
+    Note in asset notes: "Out-licensed â€” no territory disclosed, assumed global. Partner: [name], Date: [date]"
+  â€” Collaboration / co-development with no rights-transfer language â†' layer3: pass (note deal in researchNotes)
+  â€” No matching rights-transfer deal â†' layer3: pass
+  -- Modality-group deal where title/summary indicates future/next-gen scope only (see FUTURE-SCOPE EXCEPTION above) --> layer3: pass for existing assets. Note in researchNotes.
 
 Step 5 - US Manufacturing (per asset still passing Step 4):
   Keywords: manufactur, cdmo, cmo, contract manufactur, supply agreement, tech transfer, bioreactor,
@@ -932,6 +941,48 @@ const CITELINE_PRIMARY_PROMPT = (() => {
 CONTEXT: PRIMARY TRACK - Citeline database (Steps 1+2 pre-loaded) + OneBD Cortellis deals (Steps 4+5). The company has already passed the Big Pharma pre-filter. Steps 1+2 (oncology biologic identification) are DONE - the qualifying assets are already in the user message.
 
 OBJECTIVE: Use the Citeline asset list provided. Do NOT call any pipeline lookup tool. Start immediately at STEP 3 (competitive overlap), then STEPS 4+5 via onebd_resolve_company and onebd_get_deals.
+
+CITELINE ASSET DATA — OVERVIEW-ASSISTED TARGETS & FLAGS
+
+Each asset in the user message includes these Citeline fields:
+  Targets    — structured target names from Citeline drug_targetFamilies
+  MOA        — mechanism of action text
+  Indications— all disease names for this asset
+  Overview   — full Citeline drug description (payload, mechanism, masking details may appear here)
+  Payloads   — ADC payload caption(s) if present
+
+BEFORE running Step 3, for each asset:
+
+(A) TARGET CHECK: If Targets is empty or "Undisclosed", extract target names from Overview and MOA.
+    Populate targets[] in JSON from the best available source: Targets field first, then Overview/MOA.
+    Use NCI-standard names: PD-1, HER2, EGFR, CD3, CD19, CD38, BCMA, DLL3, STEAP1, CLDN6, etc.
+
+(B) SET THESE FLAGS in the asset flags[] from Citeline data (Targets, Indications, Overview, Payloads):
+
+  "indication-synergy" — set if Indications OR Overview mentions any BeOne focus indication:
+    Hematology: CLL, SLL, WM (Waldenstrom), FL, MCL, MZL, NHL, multiple myeloma, MDS, AML, B-cell malignancies
+    Lung: SCLC, NSCLC, lung adenocarcinoma, squamous cell lung carcinoma
+    GI: ESCC, gastric/stomach cancer, GEJ/GEJC, HCC (hepatocellular), NPC, urothelial/bladder, MSI-H/dMMR, BTC/cholangiocarcinoma
+    Breast/Gyn: breast cancer (including HER2+, TNBC, triple-negative), ovarian, cervical, endometrial/uterine cancer
+    DO NOT flag: prostate cancer, glioblastoma/CNS (not BeOne focus).
+
+  "checkpoint-io-alt" — set if targets[] (after extraction) contains a non-PD-1/PD-L1 immune checkpoint:
+    LAG-3, TIM-3, TIGIT, CTLA-4, VISTA, BTLA, CD96, NKG2A, OX40, 4-1BB, CD137, ICOS, GITR
+    AND modality is NOT TCE (TCEs with 4-1BB belong to masked-tce-4-1bb instead).
+
+  "masked-tce-4-1bb" — set if EITHER:
+    (i)  targets[] contains 4-1BB or CD137 (any modality), OR
+    (ii) modality is TCE AND (Overview OR MOA) mentions masking/conditional activation language:
+         mask, prodrug, probody, TME-cleavable, protease-cleavable, conditional activation,
+         tumor microenvironment activation, switchable, latent
+
+  "adc-novel-payload" — set if modality is ADC AND EITHER:
+    (i)  Payloads or Overview mentions TWO distinct payloads (dual-payload ADC), OR
+    (ii) Payloads or Overview mentions a payload that is NOT a standard TOP1 inhibitor or MMAE:
+         Standard (do NOT flag): DXd, deruxtecan, SN-38, exatecan, irinotecan-based, MMAE alone
+         Novel (DO flag): DM1, DM4, PBD, pyrrolobenzodiazepine, calicheamicin, duocarmycin,
+         tubulysin, cryptophycin, maytansinoid, amanitin, colchicine, spliceostatin,
+         or any dual-payload combination (even MMAE+DXd, MMAE+TOP1, etc.)
 
 ${body}`
   )
@@ -1595,12 +1646,14 @@ function getAllKeywords(name) {
     .map(w => w.replace(/[^a-z0-9]/g, ''))
     .filter(w => w.length >= 3 && !skip.has(w));
 }
+let exclusionsIndex = null; // map: stemmedCompanyName → exclusion record
 
 function loadCitelineSpreadsheet() {
   const candidates = [
     path.join(__dirname, 'citeline-data', 'Citeline_Screener_Data.xlsx'),
     path.join(__dirname, 'Citeline_Screener_Data.xlsx'),
-    'C:/Users/arjun.Shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Desktop/CitelineBigData.xlsx',
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Citeline_Screener_Data.xlsx',
   ];
   const filePath = candidates.find(p => fs.existsSync(p));
   if (!filePath) {
@@ -1625,6 +1678,7 @@ function loadCitelineSpreadsheet() {
     }
   }
   console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineByName).length} companies`);
+let exclusionsIndex = null; // map: stemmedCompanyName → exclusion record
 }
 
 const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
@@ -1728,8 +1782,10 @@ function citelineGetAssetsLocal(companyName) {
     citelinePhase:    r.globalStatus,
     status:           r.globalStatus,
     companyWebsite:   null,
-    targets:          r.allMechanisms  || 'Undisclosed',
+    targets:          r.allTargets     || '',
+    moa:              r.allMechanisms  || '',
     indications:      r.allDiseases    || '',
+    drugOverview:     r.drugOverview   || '',
     allLicensees:     r.allLicensees   || '',
     allLicensers:     r.allLicensers   || '',
     allTerritories:   r.allTerritories || '',
@@ -1941,10 +1997,8 @@ const OVERVIEW_ADC_RE            = /\b(antibody[- ]drug\s+conjugate|ADC|conjugat
 // Compute flags directly from Steps 1+2 asset data (no web research needed).
 // Called automatically after every screening run - no manual autoflag step required
 // for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
-// adc-novel-payload and TCE masking moiety still need manual autoflag (payload detail not in Citeline data).
-// Called automatically after every screening run — no manual autoflag step required
-// for indication-synergy, phase-synergy, checkpoint-io-alt, or masked-tce-4-1bb (4-1BB arm).
-// adc-novel-payload now also auto-detected from drugOverview when payload text is clear.
+// Compute flags from asset data. Claude may set some flags during screening;
+// this function supplements with structured-data checks and drugOverview text.
 function computeFlagsFromAsset(asset, overview) {
   if (!asset || asset.overallStatus === 'excluded') return [];
   const flags   = new Set();
@@ -1954,9 +2008,7 @@ function computeFlagsFromAsset(asset, overview) {
   const ov       = overview || '';  // drugOverview text — second-check source
 
   // ── Indication synergy ────────────────────────────────────────────────────
-  // Strictly the structured indication field only — what's shown in the
-  // Indications column.  drugOverview and ClinicalTrials are not consulted.
-  if (matchesIndicationSynergy(asset.indication || ''))
+  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(asset.indications || ''))
     flags.add('indication-synergy');
 
   // ── Phase synergy ─────────────────────────────────────────────────────────
@@ -2162,6 +2214,7 @@ async function screenWithCitelinePrimary(companyName, client) {
       `  MOA/Targets: ${r.targets || 'Undisclosed'}\n` +
       (r.allTargetsRaw ? `  Targets(mol): ${r.allTargetsRaw}\n` : '') +
       `  Indications: ${r.indications || 'Not specified'}\n` +
+      `  Overview   : ${r.drugOverview ? r.drugOverview.substring(0, 600) : ''}\n` +
       `  Phase      : ${phase}\n` +
       `  Status     : ${r.status}` +
       (r.drugOverview ? `\n  Overview   : ${r.drugOverview.slice(0, 500)}` : '')
@@ -2390,6 +2443,22 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
       logScreeningBreakdown(citelineResult);
       console.log(`    [${companyName}] [FINAL] ${citelineResult.status} (citeline track)${citelineResult.excludedAt ? ' - excluded at ' + citelineResult.excludedAt : ''}${citelineResult.inconclusiveReason ? ' - ' + citelineResult.inconclusiveReason : ''}`);
       return citelineResult;
+    }
+    // Check Exclusions spreadsheet before routing to website input
+    const exclusionMatch = checkExclusions(companyName);
+    if (exclusionMatch) {
+      console.log(`    [${companyName}] [exclusions] ${exclusionMatch.bucket}: ${exclusionMatch.excludedReason}`);
+      return {
+        id: slugify(companyName),
+        name: companyName.replace(/BeiGene/gi, 'BeOne'),
+        type: 'unknown', website: null,
+        status: 'excluded', sourceTrack: 'citeline',
+        excludedAt: 'Steps 1+2', excludedReason: exclusionMatch.excludedReason,
+        excludedSource: '', inconclusiveReason: '',
+        assets: [], deals: [], beoneAnalyzed: false, beoneOutcome: null,
+        flags: [], externalSourcing: false, externalSources: [], researchNotes: '',
+        sources: [{ url: 'citeline:exclusions', label: 'Citeline Exclusions list', usedFor: 'Steps 1+2 — modality/indication pre-filter', type: 'citeline' }],
+      };
     }
     // Distinguish 'not found in Citeline' from 'found but screening threw an error'
     const inconclusiveReason = citelineError
@@ -3140,4 +3209,5 @@ app.listen(PORT, () => {
   console.log(`\nâœ“ BeOne Screener running â†' http://localhost:${PORT}`);
   console.log(`  Open that URL in your browser (not the file directly)\n`);
   loadCitelineSpreadsheet();
+  loadExclusionsSpreadsheet();
 });
