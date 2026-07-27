@@ -1678,7 +1678,77 @@ function loadCitelineSpreadsheet() {
     }
   }
   console.log(`[citeline] Spreadsheet ready: ${rows.length} rows, ${Object.keys(citelineByName).length} companies`);
-let exclusionsIndex = null; // map: stemmedCompanyName → exclusion record
+}
+
+function loadExclusionsSpreadsheet() {
+  const candidates = [
+    path.join(__dirname, 'citeline-data', 'Exclusions.xlsx'),
+    path.join(__dirname, 'Exclusions.xlsx'),
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Desktop/Exclusions.xlsx',
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Documents/Exclusions.xlsx',
+    'C:/Users/arjun.shah/OneDrive - BeiGene/Exclusions.xlsx',
+  ];
+  const filePath = candidates.find(p => fs.existsSync(p));
+  if (!filePath) {
+    console.log('[exclusions] No Exclusions spreadsheet found -- skipping');
+    return;
+  }
+  console.log(`[exclusions] Loading: ${path.basename(filePath)}`);
+  const XLSX = require('xlsx');
+  const wb = XLSX.readFile(filePath);
+  exclusionsIndex = {};
+
+  const oncNonBiolSheet = wb.Sheets['ONC, NON-BIOL'];
+  if (oncNonBiolSheet) {
+    const rows = XLSX.utils.sheet_to_json(oncNonBiolSheet);
+    for (const row of rows) {
+      const stem = stemCompany(row.companyName);
+      if (!stem || stem.length < 3) continue;
+      exclusionsIndex[stem] = { bucket: 'ONC_NON_BIOL', assets: row.oncologyAssets || '', companyName: row.companyName };
+    }
+    console.log(`[exclusions] ONC, NON-BIOL: ${rows.length} companies`);
+  }
+
+  const nonOncSheet = wb.Sheets['NON ONC'];
+  if (nonOncSheet) {
+    const rows = XLSX.utils.sheet_to_json(nonOncSheet);
+    for (const row of rows) {
+      const stem = stemCompany(row.companyName);
+      if (!stem || stem.length < 3) continue;
+      if (!exclusionsIndex[stem]) {
+        exclusionsIndex[stem] = { bucket: 'NON_ONC', indications: row.indicationGroups || '', companyName: row.companyName };
+      }
+    }
+    console.log(`[exclusions] NON ONC: ${rows.length} companies`);
+  }
+
+  console.log(`[exclusions] Ready: ${Object.keys(exclusionsIndex).length} total stems`);
+}
+
+function checkExclusions(companyName) {
+  if (!exclusionsIndex) return null;
+  const needle = stemCompany(companyName);
+  if (!needle || needle.length < 3) return null;
+
+  let match = exclusionsIndex[needle];
+  if (!match) {
+    const entry = Object.entries(exclusionsIndex).find(([stem]) =>
+      needle.length >= 4 && stem.length >= 4 && (stem.includes(needle) || needle.includes(stem))
+    );
+    if (entry) match = entry[1];
+  }
+  if (!match) return null;
+  if (!closeNameMatch(companyName, match.companyName)) return null;
+
+  if (match.bucket === 'ONC_NON_BIOL') {
+    const assetList = (match.assets || '').split(';').map(s => s.trim()).filter(Boolean).slice(0, 5).join(', ') || 'non-biologic assets';
+    return { bucket: 'ONC_NON_BIOL', excludedReason: `All oncology assets are non-biologic: ${assetList}` };
+  }
+  if (match.bucket === 'NON_ONC') {
+    const indList = (match.indications || '').split(';').map(s => s.trim()).filter(Boolean).slice(0, 3).join(', ') || 'non-oncology indications';
+    return { bucket: 'NON_ONC', excludedReason: `No oncology assets -- pipeline covers: ${indList}` };
+  }
+  return null;
 }
 
 const EXCLUDED_STATUSES = new Set(['Discontinued', 'Withdrawn', 'Suspended', 'Ceased']);
