@@ -2278,9 +2278,7 @@ async function screenWithCitelinePrimary(companyName, client) {
   console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
 
   const allNDR = rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
-  const thinCoverage = rows.length <= 2
-    || rows.some(r => !r.targets || r.targets.trim() === '')
-    || allNDR;
+  const thinCoverage = rows.length <= 2 || allNDR;
 
   const assetLines = rows.map((r, i) => {
     const modality = CITELINE_MODALITY_MAP[r.citelineModality] || r.citelineModality;
