@@ -2086,7 +2086,10 @@ function computeFlagsFromAsset(asset, overview) {
   const ov       = overview || '';  // drugOverview text — second-check source
 
   // ── Indication synergy ────────────────────────────────────────────────────
-  if (matchesIndicationSynergy(asset.indication || '') || matchesIndicationSynergy(asset.indications || ''))
+  // Strictly the AI-summarized indication field only — not the raw Citeline
+  // indications string, which may contain unrelated disease names from other
+  // trials and would falsely fire when the indication is "cancer (unspecified)".
+  if (matchesIndicationSynergy(asset.indication || ''))
     flags.add('indication-synergy');
 
   // ── Phase synergy ─────────────────────────────────────────────────────────

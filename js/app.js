@@ -1095,7 +1095,6 @@ function renderResultsTable() {
       const isFirst = idx === 0;
       const rowspan = visibleAssets.length;
       const assetFlags = a.flags || [];
-      const allFlags = [...new Set([...companyFlags, ...assetFlags])];
       const isCompetitor = a.layer3 && a.layer3.status === 'fail';
       const isScreenedOut = a.overallStatus === 'excluded';
       const screenedOutInfo = isScreenedOut ? getScreenedOutReason(a) : null;
@@ -1138,7 +1137,7 @@ function renderResultsTable() {
             ${isScreenedOut && screenedOutInfo
               ? `<span class="screened-out-reason">${escHtml(screenedOutInfo.reason)}</span>`
               : `<div class="flags-inner">
-                  ${renderFlagBadges(allFlags)}
+                  ${renderFlagBadges(assetFlags)}
                   <button class="edit-flags-btn" data-co="${escHtml(c.id)}" data-asset-idx="${idx}" title="Edit flags">✎</button>
                 </div>`
             }
