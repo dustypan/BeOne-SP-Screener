@@ -1698,7 +1698,7 @@ function loadExclusionsSpreadsheet() {
   const wb = XLSX.readFile(filePath);
   exclusionsIndex = {};
 
-  const oncNonBiolSheet = wb.Sheets['ONC, NON-BIOL'];
+  const oncNonBiolSheet = wb.Sheets['ONC,NON-BIOL'] || wb.Sheets['ONC, NON-BIOL'];
   if (oncNonBiolSheet) {
     const rows = XLSX.utils.sheet_to_json(oncNonBiolSheet);
     for (const row of rows) {
