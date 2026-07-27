@@ -2575,7 +2575,7 @@ async function screenWithClaude(companyName, client, websiteUrl = null, opts = {
     // No user-supplied URL and not skipped — search for the pipeline page.
     console.log(`    [${companyName}] [website-input-track] No URL — searching for pipeline page`);
     _wsSystemPrompt = WEBSITE_INPUT_SEARCH_SYSTEM_PROMPT;
-    _wsTools        = WEBSITE_INPUT_SEARCH_TOOLS;
+    _wsTools        = WEBSITE_SEARCH_TOOLS;
     messages = [
       {
         role: 'user',
