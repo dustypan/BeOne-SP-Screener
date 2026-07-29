@@ -1576,7 +1576,7 @@ const QUALIFYING_BIOLOGIC_MODALITIES = new Set([
 // connection from unmanaged devices). Falls back to SQL if no file.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-const COMPANY_SUFFIXES = /[\s\-]*(therapeutics?|biosciences?|biotechnolog(?:y|ies)|biotech|biopharma|pharmaceuticals?|pharma|sciences?|biotherapeutics?|oncolog(?:y|ies)|medicines?|health(?:care)?|biologics?|bio|inc\.?|ltd\.?|llc\.?|co\.?|corp\.?|corporation|group|holdings?|labs?|laborator(?:y|ies)|partners?)\s*$/i;
+const COMPANY_SUFFIXES = /[\s\-]*(therapeutics?|biosciences?|biotechnolog(?:y|ies)|biotech|biopharma|pharmaceuticals?|pharma|sciences?|biotherapeutics?|oncolog(?:y|ies)|medicines?|health(?:care)?|biologics?|bio|technologies?|tech|digital|ventures?|capital|innovations?|inc\.?|ltd\.?|llc\.?|co\.?|corp\.?|corporation|group|holdings?|labs?|laborator(?:y|ies)|partners?)\s*$/i;
 
 function stemCompany(name) {
   // Split CamelCase so "HanchorBio" â†' "Hanchor Bio" â†' stem "hanchor"
@@ -1794,6 +1794,20 @@ function citelineGetAssetsLocal(companyName) {
         console.log(`    [${companyName}] [citeline] keyword-overlap match: ${overlap.map(([cn]) => cn).join(', ')}`);
         matchingCompanies = overlap;
       }
+    }
+  }
+
+  // Root-word prefix fallback: catches compound one-word names where the suffix
+  // wasn't stripped (e.g. "JechoTech" → root "jecho" → accept any candidate
+  // whose name starts with "jecho" as a whole word).
+  if (matchingCompanies.length === 0 && candidates.length > 0 && root.length >= 4) {
+    const rootPrefixRe = new RegExp('^' + root + '(?:\\s|$)', 'i');
+    const rootMatch = candidates.filter(([cn]) =>
+      rootPrefixRe.test(cn.replace(/[^a-z0-9\s]/gi, '').trim())
+    );
+    if (rootMatch.length > 0) {
+      console.log(`    [${companyName}] [citeline] root-prefix fallback: ${rootMatch.map(([cn]) => cn).join(', ')}`);
+      matchingCompanies = rootMatch;
     }
   }
 
