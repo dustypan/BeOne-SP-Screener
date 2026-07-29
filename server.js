@@ -1772,8 +1772,16 @@ function citelineGetAssetsLocal(companyName) {
   // the root word (case-insensitive). "JechoBio" → root "jecho" matches
   // "Jecho Biopharmaceuticals"; "Primelink" → root "primelink" matches
   // "PrimeLink BioTherapeutics" but not "Prime Medicine".
+  // Stem fallback: handles all-lowercase compound names ("jechobio" → stem "jecho")
+  // where CamelCase splitting didn't fire and root == the full unsplit word.
+  const stem = stemCompany(companyName);
   const candidates = Object.entries(citelineByName)
-    .filter(([cn]) => cn.toLowerCase().includes(root));
+    .filter(([cn]) => {
+      const cnl = cn.toLowerCase();
+      if (cnl.includes(root)) return true;
+      if (stem && stem.length >= 3 && stem !== root && cnl.replace(/\s+/g, '').includes(stem)) return true;
+      return false;
+    });
 
   // Apply the close-name guard to reject coincidental substring hits
   // (e.g. root "impact" would also match "PACT Pharma" without this filter).
