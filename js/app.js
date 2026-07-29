@@ -1375,10 +1375,19 @@ function renderExcludedFooter() {
 
   const EXCLUDED_AT_LABELS = {
     'Steps 1+2':   'Drug Type (Steps 1 + 2)',
+    'step1-2':     'Drug Type (Steps 1 + 2)',
+    'layer1':      'Drug Type (Steps 1 + 2)',
+    'layer2':      'Drug Type (Steps 1 + 2)',
     'pre-filter':  'Pre-filter (Step 0)',
     'Step 3':      'Competitive Overlap (Step 3)',
+    'step3':       'Competitive Overlap (Step 3)',
+    'layer3':      'Competitive Overlap (Step 3)',
     'Step 4':      'Licensing (Step 4)',
+    'step4':       'Licensing (Step 4)',
+    'layer4':      'Licensing (Step 4)',
     'Step 5':      'Manufacturing (Step 5)',
+    'step5':       'Manufacturing (Step 5)',
+    'layer5':      'Manufacturing (Step 5)',
   };
   // Rows for screener-excluded companies
   const screenerRows = screenerExcluded.map(c => {

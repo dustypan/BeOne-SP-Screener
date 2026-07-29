@@ -2355,7 +2355,7 @@ async function screenWithCitelinePrimary(companyName, client) {
         console.log(`    [${companyName}] [citeline] thin-coverage pipeline URL: ${pipelineUrl}`);
         try {
           const content = await fetchWebpage(pipelineUrl);
-          if (content && content.length > 100) return { content, url: pipelineUrl };
+          if (content && content.length > 500) return { content, url: pipelineUrl };
         } catch (e) {
           console.log(`    [${companyName}] [citeline] pipeline URL fetch failed: ${e.message}`);
         }
@@ -2364,7 +2364,7 @@ async function screenWithCitelinePrimary(companyName, client) {
         console.log(`    [${companyName}] [citeline] thin-coverage crawling homepage: ${companyWebsite}`);
         try {
           const fetched = await findAndFetchPipelinePage(companyWebsite);
-          if (fetched && fetched.content && fetched.content.length > 100) return fetched;
+          if (fetched && fetched.content && fetched.content.length > 500) return fetched;
         } catch (e) {
           console.log(`    [${companyName}] [citeline] homepage crawl failed: ${e.message}`);
         }
@@ -2382,7 +2382,7 @@ async function screenWithCitelinePrimary(companyName, client) {
   }
 
   const thinCoverageInstruction = thinCoverage && websiteContent
-    ? `THIN COVERAGE — MERGE ASSETS FROM BOTH SOURCES:\nCiteline data is sparse (${allNDR ? 'all NDR' : rows.length <= 2 ? `only ${rows.length} asset(s)` : 'missing targets'}). Pipeline page pre-fetched below.\nMerge Citeline assets with website assets into one list, then run Steps 3–5.\n\nPIPELINE PAGE (${fetchedPipelineUrl}):\n${'─'.repeat(60)}\n${websiteContent.slice(0, 8000)}\n${'─'.repeat(60)}`
+    ? `THIN COVERAGE — SUPPLEMENT CITELINE WITH WEBSITE:\nCiteline data is sparse (${allNDR ? 'all NDR' : rows.length <= 2 ? `only ${rows.length} asset(s)` : 'missing targets'}). Pipeline page pre-fetched below.\nUse the website to ADD assets not already in Citeline, then run Steps 3–5 on the merged list.\n\nCRITICAL — DO NOT USE WEBSITE TO CONTRADICT CITELINE:\n- Citeline has already confirmed the assets above as oncology biologics (Steps 1+2 done for those assets).\n- If the website shows general company description or marketing text (e.g. "small-molecule drugs", "innovative therapies") but no visible pipeline table, IGNORE that marketing text — it does not override Citeline.\n- JS-rendered pipeline pages often show only a static marketing shell in the fetched HTML; the biologic pipeline table is invisible. If the website content below appears sparse or shows only company-level copy, treat it as empty.\n- Only use website content to find ADDITIONAL assets. Never use it to exclude Citeline-confirmed biologic assets or to re-determine Steps 1+2 for assets already listed above.\n\nPIPELINE PAGE (${fetchedPipelineUrl}):\n${'─'.repeat(60)}\n${websiteContent.slice(0, 8000)}\n${'─'.repeat(60)}`
     : `Steps 1+2 are DONE. Start at Step 3 (competitive overlap) immediately, then Steps 4+5 via OneBD.`;
 
   const messages = [{
