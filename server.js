@@ -428,6 +428,12 @@ No oncology program anywhere in the company â†' excludedAt: "pre-filter"
 At least one oncology program â†' proceed to Layers 1-4
 Ambiguous or sparse source â†' do NOT exclude, fall through to Layers 1-4
 
+CRITICAL: Only exclude at Step 0b when you have CLEAR, POSITIVE evidence of non-oncology or non-biologic. Do NOT exclude based on absence of information. Specifically:
+- Page loads but shows little content (JavaScript-rendered, empty shell, loading spinner text) â†' fall through, do NOT exclude
+- Page "mentions a pipeline" but drug details are not visible â†' fall through, do NOT exclude
+- Page shows only small molecules but you have not seen the full pipeline (e.g. only one page fetched) â†' fall through
+- When in doubt â†' always fall through to Layers 1-4. A false negative (missing a qualifying company) is far worse than a false positive here.
+
 SCREENING LAYERS - evaluate in order only after both pre-filters pass, stop at first failure:
 
 LAYER 1 - Oncology Relevance
