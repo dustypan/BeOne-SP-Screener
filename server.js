@@ -2067,8 +2067,8 @@ const OVERVIEW_MASKED_TCE_RE = /\b(masked?|probody|conditional(?:ly)?\s*activ|TM
 const OVERVIEW_TCE_RE        = /\b(t[- ]?cell\s+engag|bispecific.*t[- ]?cell|TCE|T[- ]cell\s+redirect|CD3)\b/i;
 const OVERVIEW_4_1BB_RE      = /\b(4-1bb|cd137)\b/i;
 // Novel ADC payload — dual or unique
-const OVERVIEW_DUAL_PAYLOAD_RE   = /\b(dual[- ]payload|two\s+payload|dual[- ]warhead|two\s+warhead|combination\s+payload|dual[- ]drug)\b/i;
-const OVERVIEW_NOVEL_PAYLOAD_RE  = /\b(DM1|DM4|maytansin|PBD|pyrrolobenzodiazepin|calicheamicin|tubulysin|cryptophycin|dolastatin|duocarmycin|alpha[- ]amanitin|amanitin|MMAF|monomethyl\s+auristatin\s+F|colchicine|combretastatin|KSP\s+inhibitor|kinesin\s+spindle|CC-1065|auristatin\s+F)\b/i;
+const OVERVIEW_DUAL_PAYLOAD_RE   = /\b(dual|double|twin|biload|bi[- ]load|two[- ]payload|two[- ]warhead|two\s+drug)\b/i;
+const OVERVIEW_NOVEL_PAYLOAD_RE  = /\b(DM1|DM4|maytansin|PBD|pyrrolobenzodiazepin|calicheamicin|tubulysin|cryptophycin|dolastatin|duocarmycin|alpha[- ]amanitin|amanitin|MMAF|monomethyl\s+auristatin\s+F|colchicine|combretastatin|KSP\s+inhibitor|kinesin\s+spindle|CC-1065|auristatin\s+F|ATRi|ATR\s+inhibitor|CDK[4679]i|PARP\s+inhibitor|PARPi|BCL[- ]?2\s+inhibitor|IGF[- ]?1R\s+inhibitor|STING\s+agonist|TLR\s+agonist)\b/i;
 const OVERVIEW_COMMON_PAYLOAD_RE = /\b(DXd|deruxtecan|SN-38|exatecan|MMAE|monomethyl\s+auristatin\s+E)\b/i;
 const OVERVIEW_ADC_RE            = /\b(antibody[- ]drug\s+conjugate|ADC|conjugate)\b/i;
 
