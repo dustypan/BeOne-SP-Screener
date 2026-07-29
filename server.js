@@ -2300,7 +2300,24 @@ async function screenWithCitelinePrimary(companyName, client) {
     };
   }
 
-  console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
+  const ASSET_CAP = 30;
+  let pipelineCapped = false;
+  let cappedFromTotal = 0;
+  if (rows.length > ASSET_CAP) {
+    cappedFromTotal = rows.length;
+    const PHASE_ORDER = { 'Approved': 1, 'Pre-registration': 2, 'Phase 3': 3, 'Phase 2': 4, 'Phase 1/2': 5, 'Phase 1': 6, 'Preclinical': 7, 'No Development Reported': 8 };
+    rows.sort((a, b) => {
+      const pa = PHASE_ORDER[CITELINE_PHASE_MAP[a.citelinePhase] || 'No Development Reported'] || 8;
+      const pb = PHASE_ORDER[CITELINE_PHASE_MAP[b.citelinePhase] || 'No Development Reported'] || 8;
+      if (pa !== pb) return pa - pb;
+      return (MODALITY_PRIORITY[a.citelineModality] || 9) - (MODALITY_PRIORITY[b.citelineModality] || 9);
+    });
+    rows.splice(ASSET_CAP);
+    pipelineCapped = true;
+    console.log(`    [${companyName}] [citeline] ${cappedFromTotal} qualifying assets — capped at ${ASSET_CAP} (most advanced by phase/modality)`);
+  } else {
+    console.log(`    [${companyName}] [citeline] ${rows.length} qualifying assets`);
+  }
 
   const allNDR = rows.every(r => r.citelinePhase === 'No Development Reported' || r.status === 'No Development Reported');
   const thinCoverage = rows.length <= 2 || allNDR;
@@ -2416,6 +2433,10 @@ async function screenWithCitelinePrimary(companyName, client) {
       if (!Array.isArray(result.flags)) result.flags = [];
       if (!Array.isArray(result.deals)) result.deals = [];
       if (thinCoverage && !result.flags.includes('thin-coverage')) result.flags.push('thin-coverage');
+      if (pipelineCapped && !result.flags.includes('pipeline-capped')) {
+        result.flags.push('pipeline-capped');
+        result.researchNotes = `[Pipeline capped: ${cappedFromTotal} qualifying assets found — screened top ${ASSET_CAP} by phase/modality. Remaining ${cappedFromTotal - ASSET_CAP} assets not evaluated.] ` + (result.researchNotes || '');
+      }
       result.allSourcesConsulted = [...new Set(fetchedUrls)];
       result.evidenceSnapshots   = evidenceSnapshots;
       if (!Array.isArray(result.sources)) result.sources = [];
