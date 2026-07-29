@@ -1016,6 +1016,11 @@ function renderResults() {
   // Export
   document.getElementById('export-csv-btn').onclick = exportCSV;
 
+  // Home — go back to upload/start screen
+  document.getElementById('home-btn').onclick = () => {
+    showSection('section-upload');
+  };
+
   // Back to wizard
   document.getElementById('back-to-wizard-btn').onclick = () => {
     showSection('section-wizard');
