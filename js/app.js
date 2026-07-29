@@ -1447,23 +1447,28 @@ function appendLiveConsoleLine(companyName, text) {
   const isFirst = state.companyLogs[id].length === 0;
   state.companyLogs[id].push(text);
 
-  const panel = document.getElementById('live-console-output');
-  if (!panel) return;
+  const panels = [
+    document.getElementById('live-console-output'),
+    document.getElementById('rescreen-console-output'),
+  ].filter(Boolean);
 
-  if (isFirst) {
-    const hdr = document.createElement('div');
-    hdr.className = 'lc-company-header';
-    hdr.textContent = `── ${companyName} ──`;
-    panel.appendChild(hdr);
-  }
-  const div = document.createElement('div');
-  div.className = `lc-line ${classifyLogLine(text)}`;
-  div.textContent = text;
-  panel.appendChild(div);
+  for (const panel of panels) {
+    const firstForPanel = !panel.querySelector(`[data-co="${id}"]`);
+    if (firstForPanel) {
+      const hdr = document.createElement('div');
+      hdr.className = 'lc-company-header';
+      hdr.dataset.co = id;
+      hdr.textContent = `── ${companyName} ──`;
+      panel.appendChild(hdr);
+    }
+    const div = document.createElement('div');
+    div.className = `lc-line ${classifyLogLine(text)}`;
+    div.textContent = text;
+    panel.appendChild(div);
 
-  // Auto-scroll if user is near the bottom
-  if (panel.scrollHeight - panel.scrollTop - panel.clientHeight < 80) {
-    panel.scrollTop = panel.scrollHeight;
+    if (panel.scrollHeight - panel.scrollTop - panel.clientHeight < 80) {
+      panel.scrollTop = panel.scrollHeight;
+    }
   }
 }
 
