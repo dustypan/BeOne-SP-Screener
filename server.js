@@ -2422,6 +2422,26 @@ async function screenWithCitelinePrimary(companyName, client) {
       if (!result.sources.some(s => s.url === 'citeline:sql')) {
         result.sources.unshift({ url: 'citeline:sql', label: 'Citeline database (Steps 1+2)', usedFor: 'Steps 1+2 — oncology biologic identification', type: 'citeline' });
       }
+      // Map drugId + drugOverview back from Citeline rows so applyAutoFlags
+      // can look up the overview text (Claude doesn't echo these fields back).
+      if (Array.isArray(result.assets)) {
+        const rowByName = {};
+        for (const r of rows) {
+          const key = (r.drug || '').toLowerCase().trim();
+          if (key) rowByName[key] = r;
+          for (const alt of (r.altNames || '').split(/[;,]+/).map(s => s.trim().toLowerCase()).filter(Boolean)) {
+            if (!rowByName[alt]) rowByName[alt] = r;
+          }
+        }
+        for (const asset of result.assets) {
+          const key = (asset.name || '').toLowerCase().trim();
+          const matched = rowByName[key];
+          if (matched) {
+            if (!asset.drugId)      asset.drugId      = matched.drugId;
+            if (!asset.drugOverview) asset.drugOverview = matched.drugOverview || '';
+          }
+        }
+      }
       return result;
     }
 
