@@ -1045,11 +1045,11 @@ function getFilteredAssets(company) {
 
 function getScreenedOutReason(a) {
   if (a.overallStatus !== 'excluded') return null;
-  if (a.layer3 && a.layer3.status === 'fail') return { step: 'Step 3 — Competitive overlap', reason: a.layer3.reason || 'Direct competitor to BeOne pipeline' };
-  if (a.layer2 && a.layer2.status === 'fail') return { step: 'Step 2 — Modality', reason: a.layer2.reason || 'Excluded modality' };
-  if (a.layer1 && a.layer1.status === 'fail') return { step: 'Step 1 — Oncology relevance', reason: a.layer1.reason || 'No oncology indication' };
-  if (a.layer4 && a.layer4.status === 'fail') return { step: 'Step 4 — Rights', reason: a.layer4.reason || 'US/global rights out-licensed' };
-  if (a.layer5 && a.layer5.status === 'fail') return { step: 'Step 5 — Manufacturing', reason: a.layer5.reason || 'US manufacturing confirmed' };
+  if (a.layer3 && a.layer3.status === 'fail') return { step: 'Competitive Overlap (Step 3)', reason: a.layer3.reason || 'Direct competitor to BeOne pipeline' };
+  if (a.layer2 && a.layer2.status === 'fail') return { step: 'Drug Type (Steps 1 + 2)', reason: a.layer2.reason || 'Excluded modality' };
+  if (a.layer1 && a.layer1.status === 'fail') return { step: 'Drug Type (Steps 1 + 2)', reason: a.layer1.reason || 'No oncology indication' };
+  if (a.layer4 && a.layer4.status === 'fail') return { step: 'Licensing (Step 4)', reason: a.layer4.reason || 'US/global rights out-licensed' };
+  if (a.layer5 && a.layer5.status === 'fail') return { step: 'Manufacturing (Step 5)', reason: a.layer5.reason || 'US manufacturing confirmed' };
   return { step: 'Screened out', reason: 'See research notes' };
 }
 
@@ -1358,7 +1358,7 @@ function renderExcludedFooter() {
       const any = (c.assets || []).find(a => a.overallStatus === 'excluded');
       reasons.push(any ? (any.excludedReason || 'All assets excluded') : 'All assets excluded');
     }
-    const excludedAt = l4.length ? 'Step 4' : l5.length ? 'Step 5' : 'Steps 3–5';
+    const excludedAt = l4.length ? 'Licensing (Step 4)' : l5.length ? 'Manufacturing (Step 5)' : 'Competitive Overlap (Step 3)';
     const sourceLink = c.website
       ? `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`
       : '—';
@@ -1373,15 +1373,23 @@ function renderExcludedFooter() {
       </tr>`;
   });
 
+  const EXCLUDED_AT_LABELS = {
+    'Steps 1+2':   'Drug Type (Steps 1 + 2)',
+    'pre-filter':  'Pre-filter (Step 0)',
+    'Step 3':      'Competitive Overlap (Step 3)',
+    'Step 4':      'Licensing (Step 4)',
+    'Step 5':      'Manufacturing (Step 5)',
+  };
   // Rows for screener-excluded companies
   const screenerRows = screenerExcluded.map(c => {
     let sourceLink = '—';
     if (c.excludedSource) sourceLink = `<a href="${escHtml(c.excludedSource)}" target="_blank" rel="noopener noreferrer">Evidence ↗</a>`;
     else if (c.website)   sourceLink = `<a href="${escHtml(c.website)}" target="_blank" rel="noopener noreferrer">${c.type === 'public' ? '10-K ↗' : 'Pipeline ↗'}</a>`;
+    const excludedAtLabel = EXCLUDED_AT_LABELS[c.excludedAt] || c.excludedAt || '—';
     return `
       <tr>
         <td>${escHtml(c.name)}</td>
-        <td>${escHtml(c.excludedAt || '—')}</td>
+        <td>${escHtml(excludedAtLabel)}</td>
         <td>${escHtml(c.excludedReason || '—')}</td>
         <td>${sourceLink}</td>
         <td>${c.screenerLog ? `<button class="btn-console-view" data-id="${escHtml(c.id)}">View</button>` : '—'}</td>
