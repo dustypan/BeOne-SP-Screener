@@ -1029,7 +1029,9 @@ STEPS 1+2 - PIPELINE DISCOVERY FROM URL:
    - Screen the company IN. Sparse data is NOT grounds for inconclusive.
    - Create one asset per identifiable program: name = best description visible on the page (e.g. "anti-HER2 ADC" or "[Company] ADC Program"), modality = what the page states, indication = cancer area mentioned, targets = [] (empty — not disclosed), phase = "Not disclosed".
    - Only return inconclusive if the page is completely unreadable OR contains zero mention of an oncology biologic program.
-6. If the URL is unreadable or shows no oncology biologic program at all, return immediately:
+6. If the URL or its content CLEARLY reveals the company is not a biotech/pharma (e.g. investment firm, hedge fund, consulting firm, law firm, non-profit foundation, tech company, CDMO-only, CRO-only), return immediately:
+   status="excluded", excludedAt="pre-filter", excludedReason="Not a biotech/pharma company — [describe what it actually is]"
+   If the URL is unreadable or shows no oncology biologic program but the company may still be a biotech/pharma, return immediately:
    status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 ${body}`
@@ -2658,7 +2660,8 @@ WEBSITE INPUT TRACK - NO URL PROVIDED: No pipeline URL was given. Use web_search
 STEP 1: Search for the company's pipeline page.
  - Try: "${companyName} pipeline", "${companyName} oncology program", "${companyName} biologics clinical"
  - Maximum 3 web_search calls. Once you find a relevant company or pipeline URL, fetch it with fetch_webpage.
- - If after 3 searches no oncology biologic pipeline is found, return: status="inconclusive", inconclusiveReason="No oncology pipeline found via web search"
+ - If search results CLEARLY show the company is not a biotech/pharma (e.g. investment firm, hedge fund, consulting firm, law firm, CRO, CDMO-only, tech company, non-profit foundation), return: status="excluded", excludedAt="pre-filter", excludedReason="Not a biotech/pharma company — [describe what it actually is]"
+ - If the company seems like a biotech/pharma but no oncology biologic pipeline can be confirmed after 3 searches, return: status="inconclusive", inconclusiveReason="No oncology pipeline found via web search"
 
 STEP 2: Extract all assets and check qualification as usual.
 PERMISSIVE: If the page shows a qualifying biologic in a cancer area but no named assets/targets, screen IN — create assets from what is visible.
@@ -2692,7 +2695,8 @@ STEP 2: For each extracted asset, check:
   (b) Does the company manufacture the biologic drug substance? Exclude AI-only, payload-only, fill & finish only.
 PERMISSIVE: If the page mentions a qualifying biologic in a cancer area but no named assets or targets, screen IN — create assets from what is visible (modality, indication). Do not return inconclusive for sparse data.
 
-If the URL is completely unreadable or contains zero oncology biologic content, return:
+If the URL or its content CLEARLY shows the company is not a biotech/pharma (e.g. investment firm, hedge fund, consulting firm, non-profit, tech company), return: status="excluded", excludedAt="pre-filter", excludedReason="Not a biotech/pharma company — [describe what it actually is]"
+If the URL is completely unreadable or contains zero oncology biologic content but the company may still be a biotech/pharma, return:
   status="inconclusive", inconclusiveReason="Website Input Needed - provided URL was not readable or contained no pipeline data"
 
 Then proceed directly to Steps 3, 4, 5 (competitive overlap then OneBD deals).
